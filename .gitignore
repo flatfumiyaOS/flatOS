@@ -1,0 +1,26 @@
+# 機密情報（APIキー・サービスアカウント鍵）— 絶対にコミットしない
+業務管理アプリ/service_account.json
+業務管理アプリ/.streamlit/secrets.toml
+業務管理アプリ/Anthropic APIキー.pages
+業務管理アプリ/JSONファイル.pages
+
+# 顧客データ・案件データ（ローカル保存分。デプロイ先には含めない）
+業務管理アプリ/data/
+
+# 実際の顧客の資料（アプリの動作には不要な参考資料）
+見積書参考用/
+0917_大蔵邸改修内容.pdf
+工事案内20260715-01.pdf
+
+# アプリと関係のない作業ファイル
+ANDPAD_ClaudeCode_連携提案.html
+Claude_Code_スラッシュコマンド一覧.md
+box_1000x500x2000.stl
+cube.stl.rtf
+.claude/settings.local.json
+
+# 開発環境・キャッシュ
+業務管理アプリ/venv/
+**/__pycache__/
+*.pyc
+.DS_Store
