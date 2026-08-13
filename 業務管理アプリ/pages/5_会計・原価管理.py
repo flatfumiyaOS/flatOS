@@ -7,6 +7,7 @@ from collections import defaultdict
 
 import streamlit as st
 
+import auth_gate
 import billing_generator
 import billing_store
 import cost_store
@@ -17,6 +18,7 @@ from cost_extractor import extract_invoice_info
 from layout import show_header
 
 st.set_page_config(page_title="会計・原価管理", layout="wide")
+auth_gate.require_password()
 
 google_auth.handle_login_redirect()
 

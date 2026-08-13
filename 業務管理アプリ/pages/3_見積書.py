@@ -6,6 +6,7 @@ import re
 
 import streamlit as st
 
+import auth_gate
 import google_auth
 import project_store
 import sheets
@@ -115,6 +116,7 @@ def _clear_old_example_rows(spreadsheet_id: str) -> None:
             )
 
 st.set_page_config(page_title="見積書", layout="wide")
+auth_gate.require_password()
 
 google_auth.handle_login_redirect()
 

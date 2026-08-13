@@ -11,6 +11,7 @@ import re
 
 import streamlit as st
 
+import auth_gate
 import google_auth
 import project_store
 import sheets
@@ -67,6 +68,7 @@ def _go_to_detail(project_id: int) -> None:
 
 
 st.set_page_config(page_title="案件管理", layout="wide")
+auth_gate.require_password()
 
 google_auth.handle_login_redirect()
 

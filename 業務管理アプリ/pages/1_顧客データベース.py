@@ -3,6 +3,7 @@
 import pandas as pd
 import streamlit as st
 
+import auth_gate
 from chat import show_chat_panel, show_chat_toggle
 from db import (
     init_db,
@@ -15,6 +16,7 @@ from db import (
 from layout import show_header
 
 st.set_page_config(page_title="顧客データベース", layout="wide")
+auth_gate.require_password()
 
 init_db()
 

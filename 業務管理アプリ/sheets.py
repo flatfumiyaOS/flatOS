@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 
 import gspread
+import streamlit as st
 from google.oauth2.credentials import Credentials as UserCredentials
 from google.oauth2.service_account import Credentials as ServiceAccountCredentials
 from googleapiclient.discovery import build
@@ -21,8 +22,10 @@ from gspread.utils import ValueInputOption
 
 TEMPLATE_SPREADSHEET_ID = "1-vIOJ7nWTUZi0ChwSSsc6N2j5mq-IX3eHjVHXYd-H-A"
 
-# サービスアカウントの鍵ファイル（JSON）は、このファイルと同じフォルダに
-# 「service_account.json」という名前で置く。
+# サービスアカウントの鍵ファイル（JSON）は、ローカル開発ではこのファイルと同じ
+# フォルダに「service_account.json」という名前で置く（gitには含めない）。
+# Streamlit Community Cloudなどのデプロイ先ではファイルを置けないため、
+# その場合は st.secrets["gcp_service_account"] から読み込む。
 SERVICE_ACCOUNT_FILE = Path(__file__).resolve().parent / "service_account.json"
 
 SCOPES = [
@@ -35,24 +38,32 @@ def spreadsheet_url(spreadsheet_id: str) -> str:
     return f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit"
 
 
-def _require_service_account_file() -> None:
-    if not SERVICE_ACCOUNT_FILE.exists():
-        raise FileNotFoundError(
-            f"サービスアカウントの鍵ファイルが見つかりません: {SERVICE_ACCOUNT_FILE}"
-        )
+def _get_service_account_info() -> dict:
+    """サービスアカウントの鍵情報を返す。
 
-
-def _get_service_account_credentials() -> ServiceAccountCredentials:
-    _require_service_account_file()
-    return ServiceAccountCredentials.from_service_account_file(
-        str(SERVICE_ACCOUNT_FILE), scopes=SCOPES
+    ローカルの鍵ファイルがあればそちらを優先し、無ければ
+    st.secrets["gcp_service_account"]（デプロイ先のSecrets設定）を使う。
+    """
+    if SERVICE_ACCOUNT_FILE.exists():
+        return json.loads(SERVICE_ACCOUNT_FILE.read_text(encoding="utf-8"))
+    try:
+        if "gcp_service_account" in st.secrets:
+            return dict(st.secrets["gcp_service_account"])
+    except Exception:
+        pass
+    raise FileNotFoundError(
+        f"サービスアカウントの鍵情報が見つかりません: "
+        f"{SERVICE_ACCOUNT_FILE} も st.secrets['gcp_service_account'] もありません。"
     )
 
 
+def _get_service_account_credentials() -> ServiceAccountCredentials:
+    info = _get_service_account_info()
+    return ServiceAccountCredentials.from_service_account_info(info, scopes=SCOPES)
+
+
 def _get_service_account_email() -> str:
-    _require_service_account_file()
-    data = json.loads(SERVICE_ACCOUNT_FILE.read_text(encoding="utf-8"))
-    return data["client_email"]
+    return _get_service_account_info()["client_email"]
 
 
 def _get_client() -> gspread.Client:

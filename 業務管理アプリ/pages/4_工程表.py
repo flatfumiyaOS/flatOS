@@ -11,6 +11,7 @@ from pathlib import Path
 
 import streamlit as st
 
+import auth_gate
 import google_auth
 import schedule_generator
 import schedule_store
@@ -23,6 +24,7 @@ from layout import show_header
 SCHEDULE_COLUMN_WIDTH_PX = 50
 
 st.set_page_config(page_title="工程表", layout="wide")
+auth_gate.require_password()
 
 google_auth.handle_login_redirect()
 
