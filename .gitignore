@@ -1,6 +1,7 @@
 # 機密情報（APIキー・サービスアカウント鍵）— 絶対にコミットしない
 業務管理アプリ/service_account.json
 業務管理アプリ/.streamlit/secrets.toml
+業務管理アプリ/streamlit_cloud_secrets_DO_NOT_COMMIT.toml
 業務管理アプリ/Anthropic APIキー.pages
 業務管理アプリ/JSONファイル.pages
 
