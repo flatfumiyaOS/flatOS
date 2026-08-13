@@ -338,7 +338,7 @@ elif view_mode == "detail":
                 cols = st.columns(4)
                 for i, ph in enumerate(phase_photos):
                     with cols[i % 4]:
-                        photo_bytes = project_store.get_file_bytes(ph)
+                        photo_bytes = project_store.get_photo_display_bytes(ph)
                         if photo_bytes:
                             st.image(photo_bytes, caption=ph["filename"])
                         else:

@@ -6,9 +6,12 @@ data/projects.json（一覧）とdata/project_files/<案件ID>/（アップロ�
 
 from __future__ import annotations
 
+import io
 import json
 from datetime import datetime
 from pathlib import Path
+
+from PIL import Image, ImageOps
 
 import drive_storage
 import google_auth
@@ -162,6 +165,30 @@ def get_file_bytes(record: dict) -> bytes | None:
         return data
     except Exception:
         return None
+
+
+def get_photo_display_bytes(record: dict) -> bytes | None:
+    """写真を画面に表示するためのバイト列を返す。
+
+    スマートフォンで撮影した写真は、画素データ自体は横向きのまま、EXIFの回転情報
+    だけで正しい向きを表現していることが多い。st.image()はこの回転情報を見ないため、
+    そのまま渡すと向きがおかしく表示される。ここで回転情報を画素データに焼き込み
+    直してから返す（保存済みのファイル自体は元のまま変更しない）。
+    """
+    data = get_file_bytes(record)
+    if data is None:
+        return None
+    try:
+        image = Image.open(io.BytesIO(data))
+        original_format = image.format or "JPEG"
+        corrected = ImageOps.exif_transpose(image)
+        if original_format == "JPEG" and corrected.mode not in ("RGB", "L"):
+            corrected = corrected.convert("RGB")
+        buffer = io.BytesIO()
+        corrected.save(buffer, format=original_format)
+        return buffer.getvalue()
+    except Exception:
+        return data
 
 
 def add_document(project_id: int, filename: str, file_bytes: bytes) -> None:
