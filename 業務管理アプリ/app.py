@@ -6,9 +6,9 @@ import auth_gate
 import google_auth
 from chat import show_chat_panel, show_chat_toggle
 from db import init_db
-from layout import show_header
+from layout import APP_ICON_PATH, show_header
 
-st.set_page_config(page_title="業務管理アプリ", layout="wide")
+st.set_page_config(page_title="業務管理アプリ", page_icon=str(APP_ICON_PATH), layout="wide")
 auth_gate.require_password()
 
 # Googleログインのリダイレクトは、この画面（アプリのトップURL）に戻ってくるため、

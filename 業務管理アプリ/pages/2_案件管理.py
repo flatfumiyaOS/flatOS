@@ -17,7 +17,7 @@ import project_store
 import sheets
 from chat import show_chat_panel, show_chat_toggle
 from db import get_all_customers
-from layout import show_header
+from layout import APP_ICON_PATH, show_header
 
 PHASES = ["現地調査", "解体", "隠蔽部(電気・水道・ガス)", "木工事", "仕上げ"]
 
@@ -67,7 +67,7 @@ def _go_to_detail(project_id: int) -> None:
     st.session_state["project_view_mode"] = "detail"
 
 
-st.set_page_config(page_title="案件管理", layout="wide")
+st.set_page_config(page_title="案件管理", page_icon=str(APP_ICON_PATH), layout="wide")
 auth_gate.require_password()
 
 google_auth.handle_login_redirect()

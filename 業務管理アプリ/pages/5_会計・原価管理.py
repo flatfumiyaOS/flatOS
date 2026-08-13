@@ -15,9 +15,9 @@ import google_auth
 import project_store
 import sheets
 from cost_extractor import extract_invoice_info
-from layout import show_header
+from layout import APP_ICON_PATH, show_header
 
-st.set_page_config(page_title="会計・原価管理", layout="wide")
+st.set_page_config(page_title="会計・原価管理", page_icon=str(APP_ICON_PATH), layout="wide")
 auth_gate.require_password()
 
 google_auth.handle_login_redirect()

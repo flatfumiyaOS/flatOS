@@ -18,12 +18,12 @@ import schedule_store
 import sheets
 from chat import show_chat_panel, show_chat_toggle
 from db import get_all_customers
-from layout import show_header
+from layout import APP_ICON_PATH, show_header
 
 # B列以降の列幅（ピクセル）。新規作成した工程表には自動的にこの幅を適用する。
 SCHEDULE_COLUMN_WIDTH_PX = 50
 
-st.set_page_config(page_title="工程表", layout="wide")
+st.set_page_config(page_title="工程表", page_icon=str(APP_ICON_PATH), layout="wide")
 auth_gate.require_password()
 
 google_auth.handle_login_redirect()

@@ -12,6 +12,7 @@ import project_store
 import sheets
 from chat import show_chat_panel, show_chat_toggle
 from db import get_all_customers
+from layout import APP_ICON_PATH
 from postal import lookup_postal_code
 
 ESTIMATE_DETAIL_SHEET = "御見積内訳書"
@@ -115,7 +116,7 @@ def _clear_old_example_rows(spreadsheet_id: str) -> None:
                 ESTIMATE_ITEM_ROW_HEIGHT_PX,
             )
 
-st.set_page_config(page_title="見積書", layout="wide")
+st.set_page_config(page_title="見積書", page_icon=str(APP_ICON_PATH), layout="wide")
 auth_gate.require_password()
 
 google_auth.handle_login_redirect()

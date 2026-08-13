@@ -13,9 +13,9 @@ from db import (
     get_all_customers,
     search_customers,
 )
-from layout import show_header
+from layout import APP_ICON_PATH, show_header
 
-st.set_page_config(page_title="顧客データベース", layout="wide")
+st.set_page_config(page_title="顧客データベース", page_icon=str(APP_ICON_PATH), layout="wide")
 auth_gate.require_password()
 
 init_db()
