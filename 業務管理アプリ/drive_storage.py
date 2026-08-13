@@ -53,23 +53,44 @@ def _create_folder(drive_service, name: str, parent_id: str) -> str:
     return folder["id"]
 
 
-def get_folder_path(user_credentials: UserCredentials, *path_parts: str) -> str:
-    """flatOS_data フォルダを起点に、指定した名前のフォルダを（無ければ作成して）辿り、
-    末端フォルダのIDを返す。同じ結果はセッション中キャッシュする。"""
-    cache_key = "_drive_folder_cache::" + "/".join((APP_ROOT_FOLDER_NAME, *path_parts))
-    cached = st.session_state.get(cache_key)
-    if cached:
-        return cached
+def _get_app_root_folder_id(user_credentials: UserCredentials) -> str:
+    """バックアップの起点となるフォルダのIDを返す。
+
+    st.secrets["DRIVE_APP_FOLDER_ID"] が設定されていれば、そのフォルダを使う。
+    複数人（例: 社長と現場監督）がそれぞれ自分のGoogleアカウントでログインしても
+    同じ場所にバックアップ・復元できるよう、あらかじめ全員に共有しておいた
+    固定フォルダのIDをここに設定する運用を想定している。
+    設定が無ければ、ログイン中のアカウントのマイドライブ直下に自動作成する
+    （1人だけで使う場合の簡易動作）。
+    """
+    try:
+        configured_id = st.secrets.get("DRIVE_APP_FOLDER_ID")
+    except Exception:
+        configured_id = None
+    if configured_id:
+        return configured_id
 
     drive_service = _drive_service(user_credentials)
-    # ルート直下（マイドライブ）にアプリ用フォルダを作る
     query = (
         f"name = '{APP_ROOT_FOLDER_NAME}' and mimeType = 'application/vnd.google-apps.folder' "
         "and trashed = false and 'root' in parents"
     )
     result = drive_service.files().list(q=query, spaces="drive", fields="files(id)").execute()
     files = result.get("files", [])
-    folder_id = files[0]["id"] if files else _create_folder(drive_service, APP_ROOT_FOLDER_NAME, "root")
+    return files[0]["id"] if files else _create_folder(drive_service, APP_ROOT_FOLDER_NAME, "root")
+
+
+def get_folder_path(user_credentials: UserCredentials, *path_parts: str) -> str:
+    """バックアップ用のルートフォルダ（_get_app_root_folder_id参照）を起点に、
+    指定した名前のフォルダを（無ければ作成して）辿り、末端フォルダのIDを返す。
+    同じ結果はセッション中キャッシュする。"""
+    cache_key = "_drive_folder_cache::" + "/".join((APP_ROOT_FOLDER_NAME, *path_parts))
+    cached = st.session_state.get(cache_key)
+    if cached:
+        return cached
+
+    drive_service = _drive_service(user_credentials)
+    folder_id = _get_app_root_folder_id(user_credentials)
 
     for part in path_parts:
         existing = _find_folder(drive_service, part, folder_id)
