@@ -19,7 +19,7 @@ from chat import show_chat_panel, show_chat_toggle
 from db import get_all_customers
 from layout import show_header
 
-PHASES = ["着工前", "施工中", "完成"]
+PHASES = ["現地調査", "解体", "隠蔽部(電気・水道・ガス)", "木工事", "仕上げ"]
 
 STATUS_FILTER_ACTIVE = "施工中（進行中）"
 STATUS_FILTER_OPTIONS = [STATUS_FILTER_ACTIVE, "着工前", "完工", "すべて"]
