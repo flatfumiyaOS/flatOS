@@ -12,7 +12,23 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 
 SCOPES = ["https://www.googleapis.com/auth/drive"]
-REDIRECT_URI = "http://localhost:8501"
+
+
+def _get_redirect_uri() -> str:
+    """OAuthのリダイレクト先URL。
+
+    ローカル開発では http://localhost:8501 のままでよいが、Streamlit Community
+    Cloudなどにデプロイした場合は、実際に割り当てられたアプリのURLを
+    st.secrets["GOOGLE_OAUTH_REDIRECT_URI"] に設定する必要がある
+    （Google Cloud Console側の「承認済みのリダイレクトURI」にも同じURLの登録が必要）。
+    """
+    try:
+        return st.secrets.get("GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8501")
+    except Exception:
+        return "http://localhost:8501"
+
+
+REDIRECT_URI = _get_redirect_uri()
 
 
 def _get_client_config() -> dict:
