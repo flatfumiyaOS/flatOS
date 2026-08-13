@@ -10,6 +10,9 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+import drive_storage
+import google_auth
+
 DATA_DIR = Path(__file__).parent / "data"
 COSTS_FILE = DATA_DIR / "costs.json"
 COST_FILES_DIR = DATA_DIR / "cost_files"
@@ -20,6 +23,7 @@ def _now() -> str:
 
 
 def _load_all() -> list[dict]:
+    drive_storage.restore_if_missing(COSTS_FILE, "costs.json")
     if not COSTS_FILE.exists():
         return []
     return json.loads(COSTS_FILE.read_text(encoding="utf-8"))
@@ -28,6 +32,7 @@ def _load_all() -> list[dict]:
 def _save_all(costs: list[dict]) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     COSTS_FILE.write_text(json.dumps(costs, ensure_ascii=False, indent=2), encoding="utf-8")
+    drive_storage.backup_file(COSTS_FILE, "costs.json")
 
 
 def get_all_costs() -> list[dict]:
@@ -42,11 +47,40 @@ def get_cost(cost_id: int) -> dict | None:
     return next((c for c in _load_all() if c["id"] == cost_id), None)
 
 
-def _save_file(cost_id: int, filename: str, file_bytes: bytes) -> str:
+def _save_file(cost_id: int, filename: str, file_bytes: bytes) -> tuple[str, str | None]:
     COST_FILES_DIR.mkdir(parents=True, exist_ok=True)
     target = COST_FILES_DIR / f"{cost_id}_{filename}"
     target.write_bytes(file_bytes)
-    return str(target)
+
+    drive_file_id = None
+    if google_auth.is_logged_in():
+        try:
+            credentials = google_auth.get_credentials()
+            drive_folder_id = drive_storage.get_folder_path(credentials, "cost_files")
+            drive_file_id = drive_storage.upload_bytes(
+                credentials, drive_folder_id, target.name, file_bytes
+            )
+        except Exception:
+            drive_file_id = None
+    return str(target), drive_file_id
+
+
+def get_file_bytes(cost: dict) -> bytes | None:
+    """原価証憑（請求書PDF等）のバイト列を返す。ローカルに無ければGoogleドライブから復元する。"""
+    path = Path(cost.get("file_path") or "")
+    if path.exists():
+        return path.read_bytes()
+
+    drive_file_id = cost.get("drive_file_id")
+    if not drive_file_id or not google_auth.is_logged_in():
+        return None
+    try:
+        data = drive_storage.download_bytes(google_auth.get_credentials(), drive_file_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return data
+    except Exception:
+        return None
 
 
 def add_cost(
@@ -65,8 +99,9 @@ def add_cost(
     new_id = max((c["id"] for c in costs), default=0) + 1
     now = _now()
     file_path = None
+    drive_file_id = None
     if file_bytes is not None and file_name:
-        file_path = _save_file(new_id, file_name, file_bytes)
+        file_path, drive_file_id = _save_file(new_id, file_name, file_bytes)
     cost = {
         "id": new_id,
         "project_id": project_id,
@@ -79,6 +114,7 @@ def add_cost(
         "payment_month": payment_month,
         "paid": False,
         "file_path": file_path,
+        "drive_file_id": drive_file_id,
         "created_at": now,
         "updated_at": now,
     }

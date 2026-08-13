@@ -237,6 +237,11 @@ elif view_mode == "detail":
                 st.rerun()
 
     with tab2:
+        if not google_auth.is_logged_in():
+            st.caption(
+                "⚠️ Googleにログインしていません。ログインしないまま資料をアップロードすると、"
+                "サーバー再起動時に消えてしまう可能性があります。"
+            )
         if "doc_uploader_counter" not in st.session_state:
             st.session_state["doc_uploader_counter"] = 0
         doc_uploader_key = f"doc_uploader_{selected_id}_{st.session_state['doc_uploader_counter']}"
@@ -254,8 +259,21 @@ elif view_mode == "detail":
 
         documents = project_store.get_project(selected_id).get("documents", [])
         if documents:
-            for doc in documents:
-                st.write(f"- {doc['filename']}（アップロード日時: {doc['uploaded_at']}）")
+            for i, doc in enumerate(documents):
+                col_doc, col_dl = st.columns([4, 1])
+                with col_doc:
+                    st.write(f"- {doc['filename']}（アップロード日時: {doc['uploaded_at']}）")
+                with col_dl:
+                    doc_bytes = project_store.get_file_bytes(doc)
+                    if doc_bytes:
+                        st.download_button(
+                            "ダウンロード",
+                            doc_bytes,
+                            file_name=doc["filename"],
+                            key=f"dl_doc_{selected_id}_{i}",
+                        )
+                    else:
+                        st.caption("読み込めません")
         else:
             st.caption("まだ資料がアップロードされていません。")
 
@@ -287,6 +305,11 @@ elif view_mode == "detail":
                     st.error("URLまたはIDを入力してください。")
 
     with tab4:
+        if not google_auth.is_logged_in():
+            st.caption(
+                "⚠️ Googleにログインしていません。ログインしないまま写真をアップロードすると、"
+                "サーバー再起動時に消えてしまう可能性があります。"
+            )
         phase = st.selectbox("撮影時期", PHASES, key="photo_phase_select")
         if "photo_uploader_counter" not in st.session_state:
             st.session_state["photo_uploader_counter"] = 0
@@ -315,7 +338,11 @@ elif view_mode == "detail":
                 cols = st.columns(4)
                 for i, ph in enumerate(phase_photos):
                     with cols[i % 4]:
-                        st.image(ph["path"], caption=ph["filename"])
+                        photo_bytes = project_store.get_file_bytes(ph)
+                        if photo_bytes:
+                            st.image(photo_bytes, caption=ph["filename"])
+                        else:
+                            st.warning(f"{ph['filename']} を読み込めませんでした。")
         else:
             st.caption("まだ写真がアップロードされていません。")
 

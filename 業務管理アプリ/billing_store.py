@@ -10,6 +10,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+import drive_storage
+
 DATA_DIR = Path(__file__).parent / "data"
 BILLINGS_FILE = DATA_DIR / "billings.json"
 
@@ -22,6 +24,7 @@ def _now() -> str:
 
 
 def _load_all() -> list[dict]:
+    drive_storage.restore_if_missing(BILLINGS_FILE, "billings.json")
     if not BILLINGS_FILE.exists():
         return []
     return json.loads(BILLINGS_FILE.read_text(encoding="utf-8"))
@@ -30,6 +33,7 @@ def _load_all() -> list[dict]:
 def _save_all(billings: list[dict]) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     BILLINGS_FILE.write_text(json.dumps(billings, ensure_ascii=False, indent=2), encoding="utf-8")
+    drive_storage.backup_file(BILLINGS_FILE, "billings.json")
 
 
 def get_all_billings() -> list[dict]:

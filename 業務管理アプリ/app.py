@@ -11,10 +11,13 @@ from layout import show_header
 st.set_page_config(page_title="業務管理アプリ", layout="wide")
 auth_gate.require_password()
 
-init_db()
 # Googleログインのリダイレクトは、この画面（アプリのトップURL）に戻ってくるため、
 # どのページを開いていてもここで認可コードを処理できるようにする。
+# init_db()より先に呼ぶことで、ログイン直後の同じ実行の中でcustomers.dbの
+# Googleドライブからの復元判定が正しくログイン済み状態で行われるようにする。
 google_auth.handle_login_redirect()
+
+init_db()
 
 show_header()
 show_chat_toggle()

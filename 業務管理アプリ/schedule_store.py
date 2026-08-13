@@ -6,6 +6,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+import drive_storage
+
 DATA_DIR = Path(__file__).parent / "data"
 SCHEDULES_FILE = DATA_DIR / "schedules.json"
 
@@ -15,6 +17,7 @@ def _now() -> str:
 
 
 def _load_all() -> list[dict]:
+    drive_storage.restore_if_missing(SCHEDULES_FILE, "schedules.json")
     if not SCHEDULES_FILE.exists():
         return []
     return json.loads(SCHEDULES_FILE.read_text(encoding="utf-8"))
@@ -25,6 +28,7 @@ def _save_all(schedules: list[dict]) -> None:
     SCHEDULES_FILE.write_text(
         json.dumps(schedules, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    drive_storage.backup_file(SCHEDULES_FILE, "schedules.json")
 
 
 def get_all_schedules() -> list[dict]:

@@ -10,6 +10,9 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+import drive_storage
+import google_auth
+
 DATA_DIR = Path(__file__).parent / "data"
 PROJECTS_FILE = DATA_DIR / "projects.json"
 PROJECT_FILES_DIR = DATA_DIR / "project_files"
@@ -20,6 +23,7 @@ def _now() -> str:
 
 
 def _load_all() -> list[dict]:
+    drive_storage.restore_if_missing(PROJECTS_FILE, "projects.json")
     if not PROJECTS_FILE.exists():
         return []
     return json.loads(PROJECTS_FILE.read_text(encoding="utf-8"))
@@ -30,6 +34,7 @@ def _save_all(projects: list[dict]) -> None:
     PROJECTS_FILE.write_text(
         json.dumps(projects, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    drive_storage.backup_file(PROJECTS_FILE, "projects.json")
 
 
 def get_all_projects() -> list[dict]:
@@ -112,7 +117,9 @@ def set_schedule_spreadsheet_id(project_id: int, spreadsheet_id: str) -> None:
     _update_project(project_id, schedule_spreadsheet_id=spreadsheet_id)
 
 
-def _save_file(project_id: int, subdir: str, filename: str, file_bytes: bytes) -> str:
+def _save_file(
+    project_id: int, subdir: str, filename: str, file_bytes: bytes
+) -> tuple[str, str | None]:
     folder = PROJECT_FILES_DIR / str(project_id) / subdir
     folder.mkdir(parents=True, exist_ok=True)
     target = folder / filename
@@ -120,16 +127,55 @@ def _save_file(project_id: int, subdir: str, filename: str, file_bytes: bytes) -
         stem, suffix = target.stem, target.suffix
         target = folder / f"{stem}_{datetime.now().strftime('%H%M%S%f')}{suffix}"
     target.write_bytes(file_bytes)
-    return str(target)
+
+    drive_file_id = None
+    if google_auth.is_logged_in():
+        try:
+            credentials = google_auth.get_credentials()
+            drive_folder_id = drive_storage.get_folder_path(
+                credentials, subdir, str(project_id)
+            )
+            drive_file_id = drive_storage.upload_bytes(
+                credentials, drive_folder_id, target.name, file_bytes
+            )
+        except Exception:
+            drive_file_id = None
+    return str(target), drive_file_id
+
+
+def get_file_bytes(record: dict) -> bytes | None:
+    """写真・資料のバイト列を返す。ローカルにキャッシュがあればそこから、
+    無ければ（サーバー再起動などで消えていれば）Googleドライブから復元して返す。
+    ドライブにも無い、あるいは未ログインの場合はNoneを返す。
+    """
+    path = Path(record.get("path", ""))
+    if path.exists():
+        return path.read_bytes()
+
+    drive_file_id = record.get("drive_file_id")
+    if not drive_file_id or not google_auth.is_logged_in():
+        return None
+    try:
+        data = drive_storage.download_bytes(google_auth.get_credentials(), drive_file_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return data
+    except Exception:
+        return None
 
 
 def add_document(project_id: int, filename: str, file_bytes: bytes) -> None:
-    path = _save_file(project_id, "documents", filename, file_bytes)
+    path, drive_file_id = _save_file(project_id, "documents", filename, file_bytes)
     projects = _load_all()
     for p in projects:
         if p["id"] == project_id:
             p["documents"].append(
-                {"filename": Path(path).name, "path": path, "uploaded_at": _now()}
+                {
+                    "filename": Path(path).name,
+                    "path": path,
+                    "drive_file_id": drive_file_id,
+                    "uploaded_at": _now(),
+                }
             )
             p["updated_at"] = _now()
             break
@@ -137,7 +183,7 @@ def add_document(project_id: int, filename: str, file_bytes: bytes) -> None:
 
 
 def add_photo(project_id: int, filename: str, file_bytes: bytes, phase: str) -> None:
-    path = _save_file(project_id, "photos", filename, file_bytes)
+    path, drive_file_id = _save_file(project_id, "photos", filename, file_bytes)
     projects = _load_all()
     for p in projects:
         if p["id"] == project_id:
@@ -145,6 +191,7 @@ def add_photo(project_id: int, filename: str, file_bytes: bytes, phase: str) -> 
                 {
                     "filename": Path(path).name,
                     "path": path,
+                    "drive_file_id": drive_file_id,
                     "phase": phase,
                     "uploaded_at": _now(),
                 }
