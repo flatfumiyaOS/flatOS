@@ -62,6 +62,7 @@ def create_project(name: str) -> dict:
         "overview": "",
         "documents": [],
         "photos": [],
+        "cover_photo": None,
         "spreadsheet_id": None,
         "schedule_spreadsheet_id": None,
         "created_at": now,
@@ -223,6 +224,23 @@ def add_photo(project_id: int, filename: str, file_bytes: bytes, phase: str) -> 
                     "uploaded_at": _now(),
                 }
             )
+            p["updated_at"] = _now()
+            break
+    _save_all(projects)
+
+
+def set_cover_photo(project_id: int, filename: str, file_bytes: bytes) -> None:
+    """案件一覧カードの表紙に使う「現場建物写真」を保存する（1案件につき1枚、上書き）。"""
+    path, drive_file_id = _save_file(project_id, "cover", filename, file_bytes)
+    projects = _load_all()
+    for p in projects:
+        if p["id"] == project_id:
+            p["cover_photo"] = {
+                "filename": Path(path).name,
+                "path": path,
+                "drive_file_id": drive_file_id,
+                "uploaded_at": _now(),
+            }
             p["updated_at"] = _now()
             break
     _save_all(projects)

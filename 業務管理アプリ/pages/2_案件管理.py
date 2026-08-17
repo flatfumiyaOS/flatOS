@@ -6,10 +6,14 @@ st.session_state["project_view_mode"] で切り替える（ANDPAD風の画面遷
 
 from __future__ import annotations
 
+import base64
 import datetime
+import html
+import io
 import re
 
 import streamlit as st
+from PIL import Image
 
 import auth_gate
 import google_auth
@@ -24,6 +28,8 @@ PHASES = ["現地調査", "解体", "隠蔽部(電気・水道・ガス)", "木�
 STATUS_FILTER_ACTIVE = "施工中（進行中）"
 STATUS_FILTER_OPTIONS = [STATUS_FILTER_ACTIVE, "着工前", "完工", "すべて"]
 STATUS_BADGE_COLOR = {"施工中": "blue", "着工前": "gray", "完工": "green"}
+STATUS_BADGE_HEX = {"施工中": "#2563eb", "着工前": "#6b7280", "完工": "#16a34a"}
+CARD_FALLBACK_BG = "#1a1311"
 
 
 def _parse_date(value: str) -> datetime.date | None:
@@ -56,6 +62,73 @@ def _format_date_range(project: dict) -> str:
     start = project.get("start_date") or "未定"
     end = project.get("end_date") or "未定"
     return f"{start} 〜 {end}"
+
+
+@st.cache_data(show_spinner=False)
+def _photo_thumbnail_data_uri(photo: dict, max_dim: int = 640) -> str | None:
+    """案件カードの背景用に、現場写真を縮小してbase64データURIにして返す。
+
+    元の写真をそのまま埋め込むとカード一覧のページが重くなるため、
+    表示サイズに合わせて縮小してから埋め込む。取得できなければNoneを返す。
+    """
+    data = project_store.get_photo_display_bytes(photo)
+    if data is None:
+        return None
+    try:
+        image = Image.open(io.BytesIO(data))
+        if image.mode not in ("RGB", "L"):
+            image = image.convert("RGB")
+        image.thumbnail((max_dim, max_dim))
+        buffer = io.BytesIO()
+        image.save(buffer, format="JPEG", quality=70)
+        b64 = base64.b64encode(buffer.getvalue()).decode()
+        return f"data:image/jpeg;base64,{b64}"
+    except Exception:
+        return None
+
+
+def _render_project_card(p: dict, status: str) -> None:
+    """案件一覧の1枚のカード（現場写真を背景にしたスタイル）を描画する。"""
+    photos = p.get("photos") or []
+    bg_data_uri = _photo_thumbnail_data_uri(photos[0]) if photos else None
+
+    if bg_data_uri:
+        bg_style = (
+            "background-image: linear-gradient(rgba(20,24,33,0.75), rgba(20,24,33,0.75)), "
+            f"url('{bg_data_uri}'); background-size: cover; background-position: center;"
+        )
+    else:
+        bg_style = f"background-color: {CARD_FALLBACK_BG};"
+
+    badge_color = STATUS_BADGE_HEX.get(status, "#6b7280")
+    name = html.escape(p["name"])
+    customer = html.escape(p.get("customer_name") or "未設定")
+    address = html.escape(p.get("address") or "未設定")
+    period = html.escape(_format_date_range(p))
+    status_label = html.escape(status)
+
+    st.markdown(
+        f"""
+        <div style="{bg_style} border-radius: 12px 12px 0 0; box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+                    padding: 16px; min-height: 190px; display: flex; flex-direction: column;
+                    justify-content: space-between;">
+            <div>
+                <span style="display:inline-block; background:{badge_color}; color:#ffffff;
+                             font-size:12px; font-weight:600; padding:3px 10px; border-radius:999px;
+                             margin-bottom:10px;">{status_label}</span>
+                <div style="color:#ffffff; font-weight:700; font-size:17px; line-height:1.4;
+                            text-shadow: 0 1px 3px rgba(0,0,0,0.6);">{name}</div>
+            </div>
+            <div style="color:#e5e5e5; font-size:12.5px; line-height:1.7;
+                        text-shadow: 0 1px 2px rgba(0,0,0,0.6);">
+                顧客名: {customer}<br>
+                現場住所: {address}<br>
+                {period}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _go_to_list() -> None:
@@ -114,16 +187,27 @@ if view_mode == "list":
         if not filtered_projects:
             st.caption("該当する案件がありません。")
         else:
+            # st.container(key=...)で生成される "st-key-project_card_<id>" クラスに対して、
+            # カード上部（写真+情報）と下の「詳細を開く」ボタンの間の余白を詰める。
+            st.markdown(
+                """
+                <style>
+                div[class*="st-key-project_card_"] { gap: 0 !important; }
+                div[class*="st-key-project_card_"] div[data-testid="stButton"] button {
+                    border-radius: 0 0 12px 12px !important;
+                    border-top: none !important;
+                }
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
+
             cols = st.columns(3)
             for i, p in enumerate(filtered_projects):
                 status = _project_status(p, today)
                 with cols[i % 3]:
-                    with st.container(border=True):
-                        st.markdown(f"**{p['name']}**")
-                        st.caption(f"顧客名: {p.get('customer_name') or '未設定'}")
-                        st.caption(f"現場住所: {p.get('address') or '未設定'}")
-                        st.caption(_format_date_range(p))
-                        st.badge(status, color=STATUS_BADGE_COLOR.get(status, "gray"))
+                    with st.container(key=f"project_card_{p['id']}"):
+                        _render_project_card(p, status)
                         if st.button(
                             "詳細を開く", key=f"open_project_{p['id']}", width="stretch"
                         ):
@@ -151,6 +235,9 @@ elif view_mode == "create":
         with col_end:
             end_date_value = st.date_input("完工予定日", value=datetime.date.today())
         overview = st.text_area("工事概要", height=120)
+        cover_photo_file = st.file_uploader(
+            "現場建物写真（案件一覧カードの表紙に使います）", type=["jpg", "jpeg", "png"]
+        )
         submitted = st.form_submit_button("保存", type="primary")
         if submitted:
             if not new_name.strip():
@@ -168,6 +255,10 @@ elif view_mode == "create":
                     end_date_value.isoformat(),
                     overview,
                 )
+                if cover_photo_file is not None:
+                    project_store.set_cover_photo(
+                        new_project["id"], cover_photo_file.name, cover_photo_file.getvalue()
+                    )
                 st.success(f"「{new_name}」を登録しました。")
                 _go_to_detail(new_project["id"])
                 st.rerun()
@@ -201,6 +292,12 @@ elif view_mode == "detail":
             if current_customer_name in customer_names
             else 0
         )
+        current_cover = project.get("cover_photo")
+        if current_cover:
+            cover_bytes = project_store.get_photo_display_bytes(current_cover)
+            if cover_bytes:
+                st.image(cover_bytes, caption="現在の現場建物写真", width=240)
+
         with st.form("basic_info_form"):
             customer_name = st.selectbox(
                 "顧客名", options=customer_names, index=default_customer_index
@@ -220,6 +317,9 @@ elif view_mode == "detail":
             overview = st.text_area(
                 "工事概要", value=project.get("overview", ""), height=120
             )
+            cover_photo_file = st.file_uploader(
+                "現場建物写真（案件一覧カードの表紙に使います）", type=["jpg", "jpeg", "png"]
+            )
             saved = st.form_submit_button("保存")
             if saved:
                 selected_customer_name = (
@@ -233,6 +333,10 @@ elif view_mode == "detail":
                     end_date_value.isoformat(),
                     overview,
                 )
+                if cover_photo_file is not None:
+                    project_store.set_cover_photo(
+                        selected_id, cover_photo_file.name, cover_photo_file.getvalue()
+                    )
                 st.success("保存しました。")
                 st.rerun()
 
