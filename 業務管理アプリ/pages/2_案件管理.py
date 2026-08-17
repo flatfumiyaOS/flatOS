@@ -88,9 +88,15 @@ def _photo_thumbnail_data_uri(photo: dict, max_dim: int = 640) -> str | None:
 
 
 def _render_project_card(p: dict, status: str) -> None:
-    """案件一覧の1枚のカード（現場写真を背景にしたスタイル）を描画する。"""
+    """案件一覧の1枚のカード（現場写真を背景にしたスタイル）を描画する。
+
+    背景画像は、登録されていれば表紙写真（cover_photo）を優先し、
+    無ければ現場写真ギャラリーの最初の1枚を使う。どちらも無ければ背景色のみにする。
+    """
     photos = p.get("photos") or []
-    bg_data_uri = _photo_thumbnail_data_uri(photos[0]) if photos else None
+    cover_photo = p.get("cover_photo")
+    bg_source = cover_photo or (photos[0] if photos else None)
+    bg_data_uri = _photo_thumbnail_data_uri(bg_source) if bg_source else None
 
     if bg_data_uri:
         bg_style = (
