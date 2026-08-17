@@ -11,11 +11,14 @@ import auth_gate
 import billing_generator
 import billing_store
 import cost_store
+import db
 import google_auth
 import project_store
 import sheets
 from cost_extractor import extract_invoice_info
 from layout import APP_ICON_PATH, show_header
+
+NEW_VENDOR_OPTION = "＋ 新しい業者名を入力"
 
 st.set_page_config(page_title="会計・原価管理", page_icon=str(APP_ICON_PATH), layout="wide")
 auth_gate.require_password()
@@ -110,9 +113,32 @@ with tab1:
     result = st.session_state.get("cost_ocr_result")
     if result and projects:
         st.markdown("#### 読み取り結果（内容を確認・修正してください）")
-        vendor_name = st.text_input(
-            "請求元業者名", value=result.get("vendor_name", ""), key="cost_vendor_name"
+
+        vendor_rows = db.get_all_vendors()
+        vendor_names = [v["name"] for v in vendor_rows]
+        ocr_vendor_name = result.get("vendor_name", "")
+        vendor_options = vendor_names + [NEW_VENDOR_OPTION]
+        default_vendor_index = (
+            vendor_names.index(ocr_vendor_name) if ocr_vendor_name in vendor_names else len(vendor_names)
         )
+        vendor_choice = st.selectbox(
+            "請求元業者名",
+            options=vendor_options,
+            index=default_vendor_index,
+            key="cost_vendor_select",
+        )
+        save_new_vendor = False
+        if vendor_choice == NEW_VENDOR_OPTION:
+            vendor_name = st.text_input(
+                "業者名を入力", value=ocr_vendor_name, key="cost_vendor_name_new"
+            )
+            save_new_vendor = st.checkbox(
+                "この業者を協力会社データベースに登録する（次回から選択できるようになります）",
+                value=True,
+                key="cost_vendor_save_new",
+            )
+        else:
+            vendor_name = vendor_choice
         col_incl, col_excl = st.columns(2)
         with col_incl:
             amount_incl = st.number_input(
@@ -173,22 +199,27 @@ with tab1:
             )
 
         if st.button("登録", key="cost_register_button", type="primary"):
-            cost_store.add_cost(
-                project_id=selected_project_id,
-                project_name=_project_label(selected_project_id),
-                vendor_name=vendor_name,
-                amount_tax_included=int(amount_incl),
-                amount_tax_excluded=int(amount_excl),
-                work_type=work_type,
-                invoice_date=invoice_date_value.isoformat(),
-                payment_month=payment_month_value.strip(),
-                file_bytes=st.session_state.get("cost_ocr_file_bytes"),
-                file_name=st.session_state.get("cost_ocr_file_name"),
-            )
-            st.success("原価データとして登録しました。")
-            for key in ("cost_ocr_result", "cost_ocr_file_bytes", "cost_ocr_file_name"):
-                st.session_state.pop(key, None)
-            st.rerun()
+            if not vendor_name.strip():
+                st.error("業者名を入力してください。")
+            else:
+                if save_new_vendor and vendor_name.strip() not in vendor_names:
+                    db.add_vendor(vendor_name.strip(), "", "", "", "", "")
+                cost_store.add_cost(
+                    project_id=selected_project_id,
+                    project_name=_project_label(selected_project_id),
+                    vendor_name=vendor_name.strip(),
+                    amount_tax_included=int(amount_incl),
+                    amount_tax_excluded=int(amount_excl),
+                    work_type=work_type,
+                    invoice_date=invoice_date_value.isoformat(),
+                    payment_month=payment_month_value.strip(),
+                    file_bytes=st.session_state.get("cost_ocr_file_bytes"),
+                    file_name=st.session_state.get("cost_ocr_file_name"),
+                )
+                st.success("原価データとして登録しました。")
+                for key in ("cost_ocr_result", "cost_ocr_file_bytes", "cost_ocr_file_name"):
+                    st.session_state.pop(key, None)
+                st.rerun()
 
     st.divider()
     st.markdown("#### 登録済みの協力会社請求書")

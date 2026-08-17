@@ -13,7 +13,7 @@ import google_auth
 DB_PATH = Path(__file__).parent / "data" / "customers.db"
 DB_DRIVE_FILENAME = "customers.db"
 
-_TABLES_FOR_EMPTY_CHECK = ("customers", "documents", "memory_notes")
+_TABLES_FOR_EMPTY_CHECK = ("customers", "documents", "memory_notes", "vendors")
 
 
 def _restore_db_from_drive_if_empty() -> None:
@@ -110,6 +110,21 @@ def init_db() -> None:
             category TEXT NOT NULL,
             content TEXT NOT NULL,
             created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS vendors (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            kana TEXT,
+            phone TEXT,
+            email TEXT,
+            address TEXT,
+            memo TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
         )
         """
     )
@@ -239,6 +254,74 @@ def get_memory_notes(category: str):
     rows = conn.execute(
         "SELECT * FROM memory_notes WHERE category = ? ORDER BY id ASC",
         (category,),
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+def add_vendor(name, kana, phone, email, address, memo) -> None:
+    now = datetime.now().isoformat(timespec="seconds")
+    conn = get_connection()
+    conn.execute(
+        """
+        INSERT INTO vendors (name, kana, phone, email, address, memo, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (name, kana, phone, email, address, memo, now, now),
+    )
+    conn.commit()
+    conn.close()
+    _backup_db_to_drive()
+
+
+def update_vendor(vendor_id, name, kana, phone, email, address, memo) -> None:
+    now = datetime.now().isoformat(timespec="seconds")
+    conn = get_connection()
+    conn.execute(
+        """
+        UPDATE vendors
+        SET name = ?, kana = ?, phone = ?, email = ?, address = ?, memo = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (name, kana, phone, email, address, memo, now, vendor_id),
+    )
+    conn.commit()
+    conn.close()
+    _backup_db_to_drive()
+
+
+def delete_vendor(vendor_id) -> None:
+    conn = get_connection()
+    conn.execute("DELETE FROM vendors WHERE id = ?", (vendor_id,))
+    conn.commit()
+    conn.close()
+    _backup_db_to_drive()
+
+
+def get_all_vendors():
+    conn = get_connection()
+    rows = conn.execute("SELECT * FROM vendors ORDER BY id DESC").fetchall()
+    conn.close()
+    return rows
+
+
+def get_vendor(vendor_id):
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM vendors WHERE id = ?", (vendor_id,)).fetchone()
+    conn.close()
+    return row
+
+
+def search_vendors(keyword: str):
+    conn = get_connection()
+    like = f"%{keyword}%"
+    rows = conn.execute(
+        """
+        SELECT * FROM vendors
+        WHERE name LIKE ? OR kana LIKE ? OR phone LIKE ? OR email LIKE ? OR address LIKE ?
+        ORDER BY id DESC
+        """,
+        (like, like, like, like, like),
     ).fetchall()
     conn.close()
     return rows
