@@ -50,6 +50,7 @@ st.divider()
 # --- 検索 ---
 keyword = st.text_input("顧客を検索（氏名・フリガナ・電話番号・メール・住所）")
 rows = search_customers(keyword) if keyword.strip() else get_all_customers()
+rows = sorted(rows, key=lambda r: r["kana"] or r["name"])
 
 st.write(f"登録件数: {len(rows)} 件")
 
@@ -59,7 +60,6 @@ else:
     df = pd.DataFrame(
         [
             {
-                "ID": r["id"],
                 "氏名・会社名": r["name"],
                 "フリガナ": r["kana"],
                 "電話番号": r["phone"],
@@ -75,7 +75,7 @@ else:
     st.divider()
     st.subheader("編集・削除")
 
-    id_to_label = {r["id"]: f'{r["id"]}: {r["name"]}' for r in rows}
+    id_to_label = {r["id"]: r["name"] for r in rows}
     selected_id = st.selectbox(
         "編集・削除する顧客を選択してください",
         options=list(id_to_label.keys()),
