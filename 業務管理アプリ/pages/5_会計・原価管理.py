@@ -5,6 +5,8 @@ from __future__ import annotations
 import datetime
 from collections import defaultdict
 
+import altair as alt
+import pandas as pd
 import streamlit as st
 
 import auth_gate
@@ -76,6 +78,67 @@ def _project_revenue(project: dict) -> int:
         if total is not None:
             return total
     return 0
+
+
+# 収支ダッシュボードのグラフで使う色（売上・原価・粗利の3系列を固定の順番・配色にする）
+FINANCE_METRICS = ["売上", "原価", "粗利"]
+FINANCE_COLORS = {"売上": "#2a78d6", "原価": "#eb6834", "粗利": "#1baf7a"}
+
+
+def _finance_trend_chart(rows: list[dict], period_field: str) -> alt.Chart:
+    """月次・年次サマリー用の、売上・原価・粗利を並べたグループ棒グラフを作る。
+
+    rows は {period_field: "2026-08", "revenue": int, "cost": int} のリスト
+    （期間の昇順に並んでいる前提）。
+    """
+    long_rows = []
+    for r in rows:
+        revenue, cost = r["revenue"], r["cost"]
+        for metric, value in (("売上", revenue), ("原価", cost), ("粗利", revenue - cost)):
+            long_rows.append({period_field: r[period_field], "指標": metric, "金額": value})
+    df = pd.DataFrame(long_rows)
+    periods = [r[period_field] for r in rows]
+
+    chart = (
+        alt.Chart(df)
+        .mark_bar(size=16, cornerRadiusTopLeft=4, cornerRadiusTopRight=4)
+        .encode(
+            x=alt.X(
+                f"{period_field}:O",
+                title=None,
+                sort=periods,
+                axis=alt.Axis(labelColor="#52514e", domainColor="#c3c2b7", tickColor="#c3c2b7", grid=False),
+            ),
+            y=alt.Y(
+                "金額:Q",
+                title=None,
+                axis=alt.Axis(
+                    format=",.0f",
+                    labelColor="#898781",
+                    tickColor="#e1e0d9",
+                    gridColor="#e1e0d9",
+                    domain=False,
+                    tickCount=5,
+                ),
+            ),
+            xOffset=alt.XOffset("指標:N", sort=FINANCE_METRICS),
+            color=alt.Color(
+                "指標:N",
+                sort=FINANCE_METRICS,
+                scale=alt.Scale(domain=FINANCE_METRICS, range=[FINANCE_COLORS[m] for m in FINANCE_METRICS]),
+                legend=alt.Legend(title=None, orient="top", symbolType="circle"),
+            ),
+            tooltip=[
+                alt.Tooltip(f"{period_field}:O", title=period_field),
+                alt.Tooltip("指標:N", title="項目"),
+                alt.Tooltip("金額:Q", title="金額", format=",.0f"),
+            ],
+        )
+        .properties(height=280)
+        .configure_view(strokeWidth=0)
+        .configure_axis(labelFontSize=11)
+    )
+    return chart
 
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs(
@@ -487,6 +550,15 @@ with tab5:
 
     st.markdown("#### 月次サマリー")
     if monthly:
+        chart_months = sorted(m for m in monthly.keys() if m != "不明")[-12:]
+        if chart_months:
+            monthly_chart_rows = [
+                {"月": m, "revenue": monthly[m]["revenue"], "cost": monthly[m]["cost"]}
+                for m in chart_months
+            ]
+            st.altair_chart(_finance_trend_chart(monthly_chart_rows, "月"), use_container_width=True)
+            st.caption("直近12ヶ月分を表示しています。")
+
         monthly_rows = []
         for month in sorted(monthly.keys(), reverse=True):
             rev = monthly[month]["revenue"]
@@ -505,6 +577,14 @@ with tab5:
         yearly[year]["revenue"] += vals["revenue"]
         yearly[year]["cost"] += vals["cost"]
     if yearly:
+        chart_years = sorted(y for y in yearly.keys() if y != "不明")
+        if chart_years:
+            yearly_chart_rows = [
+                {"年": y, "revenue": yearly[y]["revenue"], "cost": yearly[y]["cost"]}
+                for y in chart_years
+            ]
+            st.altair_chart(_finance_trend_chart(yearly_chart_rows, "年"), use_container_width=True)
+
         yearly_rows = []
         for year in sorted(yearly.keys(), reverse=True):
             rev = yearly[year]["revenue"]
