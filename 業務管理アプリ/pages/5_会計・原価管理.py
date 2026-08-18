@@ -143,7 +143,7 @@ def _finance_trend_chart(rows: list[dict], period_field: str) -> alt.Chart:
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs(
     [
-        "📄 協力会社請求書（AI-OCR読込）",
+        "📄 原価入力（請求書・レシート AI-OCR）",
         "📊 現場別 粗利管理",
         "🧾 顧客請求・領収書発行",
         "💳 支払管理（協力会社別）",
@@ -152,29 +152,44 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(
 )
 
 with tab1:
-    st.subheader("協力会社請求書の読み込み")
+    st.subheader("原価の読み込み（協力会社請求書・レシート）")
 
     if not projects:
         st.info("先に「案件管理」で案件を登録してください。")
 
+    entry_kind_label = st.radio(
+        "読み込む書類の種類",
+        options=["協力会社からの請求書", "レシート（ホームセンター等での材料購入）"],
+        key="cost_entry_kind",
+        horizontal=True,
+    )
+    is_receipt = entry_kind_label.startswith("レシート")
+    document_kind = "receipt" if is_receipt else "invoice"
+    category = cost_store.CATEGORY_MATERIAL if is_receipt else cost_store.CATEGORY_SUBCONTRACT
+
     uploaded_invoice = st.file_uploader(
-        "請求書をアップロード（PDF・画像）",
+        "レシートの写真をアップロード（PDF・画像）" if is_receipt else "請求書をアップロード（PDF・画像）",
         type=["pdf", "png", "jpg", "jpeg"],
         key="cost_invoice_uploader",
     )
     if uploaded_invoice is not None and st.button("AIで読み取る", key="cost_ocr_button"):
-        with st.spinner("請求書を読み取っています..."):
+        with st.spinner("読み取っています..."):
             try:
                 media_type = uploaded_invoice.type or "application/octet-stream"
-                result = extract_invoice_info(uploaded_invoice.getvalue(), media_type)
+                result = extract_invoice_info(uploaded_invoice.getvalue(), media_type, document_kind)
                 st.session_state["cost_ocr_result"] = result
                 st.session_state["cost_ocr_file_bytes"] = uploaded_invoice.getvalue()
                 st.session_state["cost_ocr_file_name"] = uploaded_invoice.name
+                st.session_state["cost_ocr_category"] = category
             except Exception as exc:
                 st.error(f"読み取りに失敗しました: {exc}")
 
     result = st.session_state.get("cost_ocr_result")
     if result and projects:
+        # 読み取り結果は登録するまでセッションに保持されるため、読み取り時点の区分を使う
+        # （読み取り後にラジオボタンを切り替えても、登録される区分がぶれないようにする）。
+        category = st.session_state.get("cost_ocr_category", category)
+        is_receipt = category == cost_store.CATEGORY_MATERIAL
         st.markdown("#### 読み取り結果（内容を確認・修正してください）")
 
         vendor_rows = db.get_all_vendors()
@@ -185,7 +200,7 @@ with tab1:
             vendor_names.index(ocr_vendor_name) if ocr_vendor_name in vendor_names else len(vendor_names)
         )
         vendor_choice = st.selectbox(
-            "請求元業者名",
+            "購入した店舗名" if is_receipt else "請求元業者名",
             options=vendor_options,
             index=default_vendor_index,
             key="cost_vendor_select",
@@ -193,11 +208,11 @@ with tab1:
         save_new_vendor = False
         if vendor_choice == NEW_VENDOR_OPTION:
             vendor_name = st.text_input(
-                "業者名を入力", value=ocr_vendor_name, key="cost_vendor_name_new"
+                "店舗名を入力" if is_receipt else "業者名を入力", value=ocr_vendor_name, key="cost_vendor_name_new"
             )
             save_new_vendor = st.checkbox(
                 "この業者を協力会社データベースに登録する（次回から選択できるようになります）",
-                value=True,
+                value=not is_receipt,
                 key="cost_vendor_save_new",
             )
         else:
@@ -205,7 +220,7 @@ with tab1:
         col_incl, col_excl = st.columns(2)
         with col_incl:
             amount_incl = st.number_input(
-                "請求金額（税込）",
+                "金額（税込）" if is_receipt else "請求金額（税込）",
                 min_value=0,
                 value=int(result.get("amount_tax_included") or 0),
                 step=1000,
@@ -213,14 +228,14 @@ with tab1:
             )
         with col_excl:
             amount_excl = st.number_input(
-                "請求金額（税抜）",
+                "金額（税抜）" if is_receipt else "請求金額（税抜）",
                 min_value=0,
                 value=int(result.get("amount_tax_excluded") or 0),
                 step=1000,
                 key="cost_amount_excl",
             )
         work_type = st.text_input(
-            "工種・内容", value=result.get("work_type", ""), key="cost_work_type"
+            "購入内容" if is_receipt else "工種・内容", value=result.get("work_type", ""), key="cost_work_type"
         )
 
         hint = (result.get("suggested_project_hint") or "").strip()
@@ -250,7 +265,7 @@ with tab1:
         col_date, col_month = st.columns(2)
         with col_date:
             invoice_date_value = st.date_input(
-                "請求日",
+                "購入日" if is_receipt else "請求日",
                 value=_parse_date(result.get("invoice_date", "")) or datetime.date.today(),
                 key="cost_invoice_date",
             )
@@ -263,7 +278,7 @@ with tab1:
 
         if st.button("登録", key="cost_register_button", type="primary"):
             if not vendor_name.strip():
-                st.error("業者名を入力してください。")
+                st.error("店舗名を入力してください。" if is_receipt else "業者名を入力してください。")
             else:
                 if save_new_vendor and vendor_name.strip() not in vendor_names:
                     db.add_vendor(vendor_name.strip(), "", "", "", "", "")
@@ -278,24 +293,26 @@ with tab1:
                     payment_month=payment_month_value.strip(),
                     file_bytes=st.session_state.get("cost_ocr_file_bytes"),
                     file_name=st.session_state.get("cost_ocr_file_name"),
+                    category=category,
                 )
                 st.success("原価データとして登録しました。")
-                for key in ("cost_ocr_result", "cost_ocr_file_bytes", "cost_ocr_file_name"):
+                for key in ("cost_ocr_result", "cost_ocr_file_bytes", "cost_ocr_file_name", "cost_ocr_category"):
                     st.session_state.pop(key, None)
                 st.rerun()
 
     st.divider()
-    st.markdown("#### 登録済みの協力会社請求書")
+    st.markdown("#### 登録済みの原価データ（請求書・レシート）")
     all_costs = cost_store.get_all_costs()
     if all_costs:
         st.dataframe(
             [
                 {
+                    "区分": c.get("category", cost_store.CATEGORY_SUBCONTRACT),
                     "案件": c["project_name"],
-                    "業者名": c["vendor_name"],
-                    "工種": c["work_type"],
+                    "業者名・店舗名": c["vendor_name"],
+                    "内容": c["work_type"],
                     "税込金額": _yen(c["amount_tax_included"]),
-                    "請求日": c["invoice_date"],
+                    "日付": c["invoice_date"],
                     "支払月": c["payment_month"],
                     "支払": "済" if c["paid"] else "未",
                 }
@@ -305,7 +322,7 @@ with tab1:
             hide_index=True,
         )
     else:
-        st.caption("まだ登録された請求書はありません。")
+        st.caption("まだ登録された原価データはありません。")
 
 with tab2:
     st.subheader("現場別 粗利管理")
@@ -322,24 +339,37 @@ with tab2:
         revenue = _project_revenue(project)
         project_costs = cost_store.get_costs_for_project(selected_id)
         cost_total = sum(c["amount_tax_included"] for c in project_costs)
+        subcontract_total = sum(
+            c["amount_tax_included"] for c in project_costs
+            if c.get("category", cost_store.CATEGORY_SUBCONTRACT) == cost_store.CATEGORY_SUBCONTRACT
+        )
+        material_total = sum(
+            c["amount_tax_included"] for c in project_costs
+            if c.get("category", cost_store.CATEGORY_SUBCONTRACT) == cost_store.CATEGORY_MATERIAL
+        )
         gross_profit = revenue - cost_total
         gross_margin = (gross_profit / revenue * 100) if revenue else 0.0
 
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3 = st.columns(3)
         col1.metric("売上高", f"¥{revenue:,}")
-        col2.metric("発生原価合計", f"¥{cost_total:,}")
-        col3.metric("粗利益", f"¥{gross_profit:,}")
-        col4.metric("粗利率", f"{gross_margin:.1f}%")
+        col2.metric("粗利益", f"¥{gross_profit:,}")
+        col3.metric("粗利率", f"{gross_margin:.1f}%")
 
-        st.markdown("#### 協力会社ごとの費用内訳")
+        col4, col5, col6 = st.columns(3)
+        col4.metric("発生原価合計", f"¥{cost_total:,}")
+        col5.metric("　内・外注費", f"¥{subcontract_total:,}")
+        col6.metric("　内・材料費", f"¥{material_total:,}")
+
+        st.markdown("#### 費用内訳（協力会社・購入店舗ごと）")
         if project_costs:
             st.dataframe(
                 [
                     {
-                        "業者名": c["vendor_name"],
-                        "工種": c["work_type"],
+                        "区分": c.get("category", cost_store.CATEGORY_SUBCONTRACT),
+                        "業者名・店舗名": c["vendor_name"],
+                        "内容": c["work_type"],
                         "税込金額": _yen(c["amount_tax_included"]),
-                        "請求日": c["invoice_date"],
+                        "日付": c["invoice_date"],
                         "支払": "済" if c["paid"] else "未",
                     }
                     for c in project_costs
@@ -443,7 +473,7 @@ with tab3:
                         )
 
 with tab4:
-    st.subheader("支払管理（協力会社別）")
+    st.subheader("支払管理（業者・店舗別）")
     all_costs = cost_store.get_all_costs()
     if not all_costs:
         st.info("まだ原価データが登録されていません。")
@@ -470,7 +500,10 @@ with tab4:
                     with col_info:
                         st.write(f"**{vendor}**　¥{vendor_total:,}（{len(items)}件）")
                         for i in items:
-                            st.caption(f"- {i['project_name']} / {i['work_type']} / ¥{i['amount_tax_included']:,}")
+                            i_category = i.get("category", cost_store.CATEGORY_SUBCONTRACT)
+                            st.caption(
+                                f"- [{i_category}] {i['project_name']} / {i['work_type']} / ¥{i['amount_tax_included']:,}"
+                            )
                     with col_check:
                         checked = st.checkbox(
                             "支払完了", value=all_paid, key=f"vendor_paid_{selected_month}_{vendor}"

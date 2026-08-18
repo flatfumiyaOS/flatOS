@@ -18,23 +18,26 @@ MODEL_NAME = "claude-sonnet-5"
 INVOICE_JSON_SCHEMA = {
     "type": "object",
     "properties": {
-        "vendor_name": {"type": "string", "description": "請求元の業者名"},
+        "vendor_name": {"type": "string", "description": "請求元の業者名、またはレシートの場合は購入した店舗名"},
         "amount_tax_included": {
             "type": "integer",
-            "description": "請求金額（税込・円）。読み取れない場合は0",
+            "description": "金額（税込・円）。読み取れない場合は0",
         },
         "amount_tax_excluded": {
             "type": "integer",
-            "description": "請求金額（税抜・円）。読み取れない場合は税込金額と同じ値",
+            "description": "金額（税抜・円）。読み取れない場合は税込金額と同じ値",
         },
-        "work_type": {"type": "string", "description": "工種・内容（例: 電気工事、給排水設備工事など）"},
+        "work_type": {
+            "type": "string",
+            "description": "工種・内容（例: 電気工事、給排水設備工事など）。レシートの場合は購入した品目の概要（例: コンパネ・ビス等）",
+        },
         "invoice_date": {
             "type": "string",
-            "description": "請求日（YYYY-MM-DD形式）。読み取れない場合は空文字",
+            "description": "請求日・購入日（YYYY-MM-DD形式）。読み取れない場合は空文字",
         },
         "suggested_project_hint": {
             "type": "string",
-            "description": "請求書内の現場住所・案件名など、該当案件を特定する手がかりになりそうな文字列。無ければ空文字",
+            "description": "書類内の現場住所・案件名など、該当案件を特定する手がかりになりそうな文字列。無ければ空文字",
         },
     },
     "required": [
@@ -48,6 +51,17 @@ INVOICE_JSON_SCHEMA = {
     "additionalProperties": False,
 }
 
+INVOICE_PROMPT = (
+    "添付した協力会社からの請求書を読み取り、内容を抽出してください。"
+    "金額は数字のみ（カンマ・円マークなし）で答えてください。"
+)
+RECEIPT_PROMPT = (
+    "添付した画像は、ホームセンターなどで購入した材料のレシートです。"
+    "店舗名をvendor_nameに、購入した商品の内容を簡潔にまとめてwork_typeに、"
+    "合計金額（税込）と購入日を読み取ってください。"
+    "金額は数字のみ（カンマ・円マークなし）で答えてください。"
+)
+
 
 def _get_api_key() -> str | None:
     try:
@@ -58,8 +72,11 @@ def _get_api_key() -> str | None:
     return os.environ.get("ANTHROPIC_API_KEY")
 
 
-def extract_invoice_info(file_bytes: bytes, media_type: str) -> dict:
-    """請求書のPDF・画像から、業者名・金額・工種・請求日などを抽出して辞書で返す。"""
+def extract_invoice_info(file_bytes: bytes, media_type: str, document_kind: str = "invoice") -> dict:
+    """請求書またはレシートのPDF・画像から、業者名（店舗名）・金額・内容・日付などを抽出して辞書で返す。
+
+    document_kind: "invoice"（協力会社請求書）または "receipt"（購入レシート）。
+    """
     api_key = _get_api_key()
     if anthropic is None or not api_key:
         raise RuntimeError("Anthropic APIキーが設定されていないため、自動読み取りができません。")
@@ -76,10 +93,7 @@ def extract_invoice_info(file_bytes: bytes, media_type: str) -> dict:
             "source": {"type": "base64", "media_type": media_type, "data": data_b64},
         }
 
-    prompt = (
-        "添付した協力会社からの請求書を読み取り、内容を抽出してください。"
-        "金額は数字のみ（カンマ・円マークなし）で答えてください。"
-    )
+    prompt = RECEIPT_PROMPT if document_kind == "receipt" else INVOICE_PROMPT
 
     client = anthropic.Anthropic(api_key=api_key)
     # max_tokensは十分な余裕を持たせ、ストリーミングで取得する

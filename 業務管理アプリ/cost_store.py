@@ -83,6 +83,10 @@ def get_file_bytes(cost: dict) -> bytes | None:
         return None
 
 
+CATEGORY_SUBCONTRACT = "外注費"
+CATEGORY_MATERIAL = "材料費"
+
+
 def add_cost(
     project_id: int,
     project_name: str,
@@ -94,6 +98,7 @@ def add_cost(
     payment_month: str,
     file_bytes: bytes | None = None,
     file_name: str | None = None,
+    category: str = CATEGORY_SUBCONTRACT,
 ) -> dict:
     costs = _load_all()
     new_id = max((c["id"] for c in costs), default=0) + 1
@@ -112,6 +117,7 @@ def add_cost(
         "work_type": work_type,
         "invoice_date": invoice_date,
         "payment_month": payment_month,
+        "category": category,
         "paid": False,
         "file_path": file_path,
         "drive_file_id": drive_file_id,
