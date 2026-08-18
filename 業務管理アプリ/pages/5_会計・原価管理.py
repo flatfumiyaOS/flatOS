@@ -21,6 +21,7 @@ from cost_extractor import extract_invoice_info
 from layout import APP_ICON_PATH, show_header
 
 NEW_VENDOR_OPTION = "＋ 新しい業者名を入力"
+UNSELECTED_VENDOR_OPTION = "（未選択）"
 
 st.set_page_config(page_title="会計・原価管理", page_icon=str(APP_ICON_PATH), layout="wide")
 auth_gate.require_password()
@@ -172,6 +173,88 @@ with tab1:
         type=["pdf", "png", "jpg", "jpeg"],
         key="cost_invoice_uploader",
     )
+
+    if st.toggle("原価を手入力", key="show_manual_cost_entry"):
+        if not projects:
+            st.info("先に「案件管理」で案件を登録してください。")
+        else:
+            with st.form("manual_cost_form", clear_on_submit=True):
+                manual_project_id = st.selectbox(
+                    "案件",
+                    options=list(project_options.keys()),
+                    format_func=_project_label,
+                    key="manual_cost_project_select",
+                )
+                manual_category = st.selectbox(
+                    "区分",
+                    options=[cost_store.CATEGORY_SUBCONTRACT, cost_store.CATEGORY_MATERIAL],
+                    key="manual_cost_category_select",
+                )
+                manual_vendor_rows = db.get_all_vendors()
+                manual_vendor_names = [v["name"] for v in manual_vendor_rows]
+                manual_vendor_choice = st.selectbox(
+                    "会社を選択",
+                    options=[UNSELECTED_VENDOR_OPTION] + manual_vendor_names + [NEW_VENDOR_OPTION],
+                    key="manual_cost_vendor_select",
+                )
+                manual_vendor_name_new = ""
+                manual_save_new_vendor = False
+                if manual_vendor_choice == NEW_VENDOR_OPTION:
+                    manual_vendor_name_new = st.text_input("業者名・店舗名を入力", key="manual_cost_vendor_new")
+                    manual_save_new_vendor = st.checkbox(
+                        "この業者を協力会社データベースに登録する",
+                        value=True,
+                        key="manual_cost_vendor_save_new",
+                    )
+                manual_amount = st.number_input(
+                    "金額（税込）", min_value=0, step=1000, key="manual_cost_amount"
+                )
+                manual_content = st.text_input("内容（工種・購入内容など）", key="manual_cost_content")
+                col_manual_date, col_manual_due = st.columns(2)
+                with col_manual_date:
+                    manual_invoice_date = st.date_input(
+                        "請求日・購入日", value=datetime.date.today(), key="manual_cost_invoice_date"
+                    )
+                with col_manual_due:
+                    manual_due_date = st.date_input(
+                        "支払期限", value=datetime.date.today(), key="manual_cost_due_date"
+                    )
+
+                if st.form_submit_button("原価を登録", type="primary"):
+                    if manual_amount <= 0:
+                        st.error("金額を入力してください。")
+                    else:
+                        if manual_vendor_choice == UNSELECTED_VENDOR_OPTION:
+                            manual_vendor_name = ""
+                        elif manual_vendor_choice == NEW_VENDOR_OPTION:
+                            manual_vendor_name = manual_vendor_name_new.strip()
+                        else:
+                            manual_vendor_name = manual_vendor_choice
+
+                        if (
+                            manual_vendor_choice == NEW_VENDOR_OPTION
+                            and manual_save_new_vendor
+                            and manual_vendor_name
+                            and manual_vendor_name not in manual_vendor_names
+                        ):
+                            db.add_vendor(manual_vendor_name, "", "", "", "", "")
+
+                        cost_store.add_cost(
+                            project_id=manual_project_id,
+                            project_name=_project_label(manual_project_id),
+                            vendor_name=manual_vendor_name,
+                            amount_tax_included=int(manual_amount),
+                            amount_tax_excluded=int(manual_amount),
+                            work_type=manual_content.strip(),
+                            invoice_date=manual_invoice_date.isoformat(),
+                            payment_month=manual_due_date.strftime("%Y-%m"),
+                            category=manual_category,
+                        )
+                        st.success("原価データとして登録しました。")
+                        st.rerun()
+
+    st.divider()
+
     if uploaded_invoice is not None and st.button("AIで読み取る", key="cost_ocr_button"):
         with st.spinner("読み取っています..."):
             try:
