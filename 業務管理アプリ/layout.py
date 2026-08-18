@@ -63,6 +63,27 @@ def _inject_home_screen_icon() -> None:
             titleMeta.content = '業務管理アプリ';
             titleMeta.setAttribute('data-flatos-icon', '1');
             doc.head.appendChild(titleMeta);
+
+            // ホーム画面に追加した際、ブラウザのアドレスバー等を表示せず
+            // 単独アプリのような画面（スタンドアロン表示）で起動させるための指定。
+            // Safariの「ホーム画面に追加」からのみ有効（iOS版Chromeなど他ブラウザは非対応）。
+            const capableMeta = doc.createElement('meta');
+            capableMeta.name = 'apple-mobile-web-app-capable';
+            capableMeta.content = 'yes';
+            capableMeta.setAttribute('data-flatos-icon', '1');
+            doc.head.appendChild(capableMeta);
+
+            const statusBarMeta = doc.createElement('meta');
+            statusBarMeta.name = 'apple-mobile-web-app-status-bar-style';
+            statusBarMeta.content = 'black-translucent';
+            statusBarMeta.setAttribute('data-flatos-icon', '1');
+            doc.head.appendChild(statusBarMeta);
+
+            const mobileCapableMeta = doc.createElement('meta');
+            mobileCapableMeta.name = 'mobile-web-app-capable';
+            mobileCapableMeta.content = 'yes';
+            mobileCapableMeta.setAttribute('data-flatos-icon', '1');
+            doc.head.appendChild(mobileCapableMeta);
         }})();
         </script>
         """,
