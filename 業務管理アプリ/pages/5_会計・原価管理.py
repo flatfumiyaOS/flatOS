@@ -407,6 +407,89 @@ with tab1:
     else:
         st.caption("まだ登録された原価データはありません。")
 
+    st.divider()
+    st.markdown("#### 登録済みの原価データを訂正する")
+    current_month = datetime.date.today().strftime("%Y-%m")
+    this_month_costs = [c for c in all_costs if (c["invoice_date"] or "")[:7] == current_month]
+    if not this_month_costs:
+        st.caption("今月分の原価データはありません。")
+    else:
+        cost_id_to_label = {
+            c["id"]: (
+                f'{c["invoice_date"]} / {c["project_name"]} / '
+                f'{c["vendor_name"] or "（未選択）"} / ¥{c["amount_tax_included"]:,}'
+            )
+            for c in this_month_costs
+        }
+        edit_cost_id = st.selectbox(
+            "訂正する原価データを選択（今月分のみ表示）",
+            options=list(cost_id_to_label.keys()),
+            format_func=lambda x: cost_id_to_label[x],
+            key="edit_cost_select",
+        )
+        edit_cost = next(c for c in this_month_costs if c["id"] == edit_cost_id)
+        project_ids = list(project_options.keys())
+
+        with st.form("edit_cost_form"):
+            edit_project_id = st.selectbox(
+                "案件",
+                options=project_ids,
+                index=project_ids.index(edit_cost["project_id"]) if edit_cost["project_id"] in project_ids else 0,
+                format_func=_project_label,
+                key="edit_cost_project_select",
+            )
+            edit_category = st.selectbox(
+                "区分",
+                options=[cost_store.CATEGORY_SUBCONTRACT, cost_store.CATEGORY_MATERIAL],
+                index=0 if edit_cost.get("category", cost_store.CATEGORY_SUBCONTRACT) == cost_store.CATEGORY_SUBCONTRACT else 1,
+                key="edit_cost_category_select",
+            )
+            edit_vendor_name = st.text_input(
+                "会社名・店舗名（空欄可）", value=edit_cost["vendor_name"], key="edit_cost_vendor"
+            )
+            edit_amount = st.number_input(
+                "金額（税込）",
+                min_value=0,
+                step=1000,
+                value=int(edit_cost["amount_tax_included"]),
+                key="edit_cost_amount",
+            )
+            edit_content = st.text_input(
+                "内容（工種・購入内容など）", value=edit_cost["work_type"], key="edit_cost_content"
+            )
+            col_edit_date, col_edit_due = st.columns(2)
+            with col_edit_date:
+                edit_invoice_date = st.date_input(
+                    "請求日・購入日",
+                    value=_parse_date(edit_cost["invoice_date"]) or datetime.date.today(),
+                    key="edit_cost_invoice_date",
+                )
+            with col_edit_due:
+                edit_due_date = st.date_input(
+                    "支払期限",
+                    value=_parse_date(f'{edit_cost["payment_month"]}-01') or datetime.date.today(),
+                    key="edit_cost_due_date",
+                )
+
+            if st.form_submit_button("更新する", type="primary"):
+                if edit_amount <= 0:
+                    st.error("金額を入力してください。")
+                else:
+                    cost_store.update_cost(
+                        cost_id=edit_cost_id,
+                        project_id=edit_project_id,
+                        project_name=_project_label(edit_project_id),
+                        vendor_name=edit_vendor_name.strip(),
+                        amount_tax_included=int(edit_amount),
+                        amount_tax_excluded=int(edit_amount),
+                        work_type=edit_content.strip(),
+                        invoice_date=edit_invoice_date.isoformat(),
+                        payment_month=edit_due_date.strftime("%Y-%m"),
+                        category=edit_category,
+                    )
+                    st.success("原価データを更新しました。")
+                    st.rerun()
+
 with tab2:
     st.subheader("現場別 粗利管理")
     if not projects:

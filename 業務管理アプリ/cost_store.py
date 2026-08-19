@@ -129,6 +129,37 @@ def add_cost(
     return cost
 
 
+def update_cost(
+    cost_id: int,
+    project_id: int,
+    project_name: str,
+    vendor_name: str,
+    amount_tax_included: int,
+    amount_tax_excluded: int,
+    work_type: str,
+    invoice_date: str,
+    payment_month: str,
+    category: str,
+) -> None:
+    costs = _load_all()
+    for c in costs:
+        if c["id"] == cost_id:
+            c.update(
+                project_id=project_id,
+                project_name=project_name,
+                vendor_name=vendor_name,
+                amount_tax_included=amount_tax_included,
+                amount_tax_excluded=amount_tax_excluded,
+                work_type=work_type,
+                invoice_date=invoice_date,
+                payment_month=payment_month,
+                category=category,
+            )
+            c["updated_at"] = _now()
+            break
+    _save_all(costs)
+
+
 def set_paid(cost_id: int, paid: bool) -> None:
     costs = _load_all()
     for c in costs:
