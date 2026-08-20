@@ -269,9 +269,9 @@ def set_border(
     end_row: int,
     start_col: int,
     end_col: int,
-    red: float = 0.85,
-    green: float = 0.85,
-    blue: float = 0.85,
+    red: float = 0.718,
+    green: float = 0.718,
+    blue: float = 0.718,
 ) -> None:
     """指定したセル範囲の全セルに、指定色の細い罫線を四辺とも設定する（既定は薄いグレー）。"""
     spreadsheet = _get_spreadsheet(spreadsheet_id)

@@ -22,6 +22,8 @@ from layout import APP_ICON_PATH, show_header
 
 # B列以降の列幅（ピクセル）。新規作成した工程表には自動的にこの幅を適用する。
 SCHEDULE_COLUMN_WIDTH_PX = 33
+# 表紙エリアの2〜4行目・工種の行の高さ（ピクセル）。
+SCHEDULE_ROW_HEIGHT_PX = 31
 
 st.set_page_config(page_title="工程表", page_icon=str(APP_ICON_PATH), layout="wide")
 auth_gate.require_password()
@@ -160,7 +162,12 @@ else:
                                 # ロゴはxlsxには埋め込まず、Googleスプレッドシートへ変換後に
                                 # IMAGE()関数でセルに収まる形で表示する
                                 # （「セル内に画像を挿入」はAPI非対応のため）。
-                                _, end_col = schedule_generator.build_schedule_xlsx(
+                                (
+                                    _,
+                                    end_col,
+                                    start_row,
+                                    last_row,
+                                ) = schedule_generator.build_schedule_xlsx(
                                     config, xlsx_path, embed_logo=False
                                 )
 
@@ -180,6 +187,13 @@ else:
                             sheet_name = config.get("sheet_name", "工程表")
                             sheets.set_column_width(
                                 new_id, sheet_name, 2, end_col, SCHEDULE_COLUMN_WIDTH_PX
+                            )
+
+                            # 行の高さも同じ理由でSheets APIから指定し直す
+                            # （表紙エリアの2〜4行目、工種の行の両方とも31pxにする）。
+                            sheets.set_row_height(new_id, sheet_name, 2, 4, SCHEDULE_ROW_HEIGHT_PX)
+                            sheets.set_row_height(
+                                new_id, sheet_name, start_row, last_row, SCHEDULE_ROW_HEIGHT_PX
                             )
 
                             # ロゴをAM2セル(AM2:AT3を結合済み)にIMAGE()関数で表示する。

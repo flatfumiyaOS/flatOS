@@ -273,10 +273,10 @@ def analyze_drawing_to_config(
 
 def build_schedule_xlsx(
     config: dict, out_path: str, embed_logo: bool = True
-) -> tuple[str, int]:
+) -> tuple[str, int, int, int]:
     """「工程表作成」スキルの生成スクリプト（build_schedule.py）をそのまま使ってxlsxを作る。
 
-    戻り値は (出力ファイルパス, 実際に使われた最終列番号=1始まり)。
+    戻り値は (出力ファイルパス, 最終列番号, 工種の開始行, 工種の最終行)（いずれも1始まり）。
     embed_logo=Falseにすると、xlsx内にはロゴ画像を埋め込まない
     （Googleスプレッドシート変換後にIMAGE()関数で別途表示する場合に使う）。
     """

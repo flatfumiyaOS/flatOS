@@ -66,7 +66,7 @@ LEFT_TOP_WRAP = Alignment(horizontal='left', vertical='top', wrap_text=True)
 # wrap_textをTrueにすると自セル内で折り返してしまいはみ出さなくなるためFalseにする。
 TASK_ALIGN = Alignment(horizontal='left', vertical='center', wrap_text=False)
 
-GRID_SIDE = Side(style='thin', color='FFD9D9D9')
+GRID_SIDE = Side(style='thin', color='FFB7B7B7')
 GRID_BORDER = Border(left=GRID_SIDE, right=GRID_SIDE, top=GRID_SIDE, bottom=GRID_SIDE)
 COVER_LABEL_FILL = PatternFill(fill_type='solid', fgColor='FFF3F3F3')  # 極薄いグレー
 
@@ -220,9 +220,8 @@ def _write_cover(ws, embed_logo: bool = True) -> None:
     ws['Y2'].alignment = LEFT_TOP_WRAP
     _style_range(ws, 'Y2:AK4', border=GRID_BORDER)
 
-    # ロゴ画像（AM2:AT3セルを結合し、その中に貼り付ける）
+    # ロゴ画像（AM2:AT3セルを結合し、その中に貼り付ける）。枠線は付けない。
     ws.merge_cells('AM2:AT3')
-    _style_range(ws, 'AM2:AT3', border=GRID_BORDER)
     if embed_logo and LOGO_PATH.exists():
         img = XLImage(str(LOGO_PATH))
         # セル結合の見た目に収まる程度のサイズに縮小する（元画像は960x204）
@@ -332,7 +331,7 @@ def build(config: dict, out_path: str, embed_logo: bool = True):
         task_font = NOISE_TASK_FONT if is_noise else TASK_FONT
 
         for row in group:
-            ws.row_dimensions[r].height = 30
+            ws.row_dimensions[r].height = 31
             # マス(9B〜)はセルを結合せず、テキストは左揃えで隣のセルにはみ出させる。
             for task in row['tasks']:
                 d1, d2, text = task['start_day'], task['end_day'], task['text']
@@ -363,9 +362,12 @@ def build(config: dict, out_path: str, embed_logo: bool = True):
     ws.freeze_panes = f'B{start_row}'
     wb.save(out_path)
     # end_col: 実際に使われた最終列（1始まりの列番号、A=1）。
-    # Googleスプレッドシート変換後に列幅をSheets APIで指定し直す際、
-    # get_column_count()などGoogle側の値に頼らず正確な範囲を渡せるようにするため返す。
-    return out_path, end_col
+    # start_row: 工種の行が始まる行番号。last_row: 工種の行の最終行番号。
+    # Googleスプレッドシート変換後に列幅・行の高さをSheets APIで指定し直す際、
+    # get_column_count()などGoogle側の値に頼らず正確な範囲を渡せるようにするため返す
+    # （xlsx→Googleスプレッドシート変換時、openpyxlで指定した幅・高さがそのまま
+    # 正しく反映されないことがあったため、変換後にSheets APIで再指定する運用にしている）。
+    return out_path, end_col, start_row, last_row
 
 
 if __name__ == '__main__':
@@ -374,5 +376,10 @@ if __name__ == '__main__':
         sys.exit(1)
     with open(sys.argv[1], encoding='utf-8') as f:
         cfg = json.load(f)
-    saved_path, saved_end_col = build(cfg, sys.argv[2])
-    print('saved:', saved_path, 'end_col:', saved_end_col)
+    saved_path, saved_end_col, saved_start_row, saved_last_row = build(cfg, sys.argv[2])
+    print(
+        'saved:', saved_path,
+        'end_col:', saved_end_col,
+        'start_row:', saved_start_row,
+        'last_row:', saved_last_row,
+    )
