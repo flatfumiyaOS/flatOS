@@ -150,6 +150,62 @@ def _get_api_key() -> str | None:
     return os.environ.get("ANTHROPIC_API_KEY")
 
 
+# Anthropic APIには1リクエストあたりのサイズ上限（base64込みで約32MB）があり、
+# 数百MBの図面PDFをそのまま送ると413エラー(request_too_large)になる。
+# これを超えるPDFは、直接送らずページごとに画像化・圧縮してから送る。
+MAX_DIRECT_UPLOAD_BYTES = 20 * 1024 * 1024
+PDF_IMAGE_MAX_DIM = 1800
+PDF_IMAGE_QUALITY = 70
+
+
+def _pdf_to_jpeg_blocks(file_bytes: bytes) -> list[dict]:
+    """大きすぎるPDFの各ページをJPEG画像に変換し、Claudeに送れるサイズまで圧縮する。"""
+    import io as _io
+
+    import fitz  # PyMuPDF
+    from PIL import Image
+
+    doc = fitz.open(stream=file_bytes, filetype="pdf")
+    blocks = []
+    try:
+        for page in doc:
+            pix = page.get_pixmap(dpi=150)
+            img = Image.open(_io.BytesIO(pix.tobytes("png")))
+            img.thumbnail((PDF_IMAGE_MAX_DIM, PDF_IMAGE_MAX_DIM))
+            buf = _io.BytesIO()
+            img.convert("RGB").save(buf, format="JPEG", quality=PDF_IMAGE_QUALITY)
+            img_b64 = base64.standard_b64encode(buf.getvalue()).decode("utf-8")
+            blocks.append(
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/jpeg", "data": img_b64},
+                }
+            )
+    finally:
+        doc.close()
+    return blocks
+
+
+def _prepare_file_blocks(file_bytes: bytes, media_type: str) -> list[dict]:
+    """図面ファイルをAPIに送るcontentブロックに変換する。大きすぎるPDFは画像化する。"""
+    if media_type == "application/pdf" and len(file_bytes) > MAX_DIRECT_UPLOAD_BYTES:
+        return _pdf_to_jpeg_blocks(file_bytes)
+    data_b64 = base64.standard_b64encode(file_bytes).decode("utf-8")
+    if media_type == "application/pdf":
+        return [
+            {
+                "type": "document",
+                "source": {"type": "base64", "media_type": media_type, "data": data_b64},
+            }
+        ]
+    return [
+        {
+            "type": "image",
+            "source": {"type": "base64", "media_type": media_type, "data": data_b64},
+        }
+    ]
+
+
 def analyze_drawing_to_config(
     file_bytes: bytes,
     media_type: str,
@@ -163,17 +219,7 @@ def analyze_drawing_to_config(
     if anthropic is None or not api_key:
         raise RuntimeError("Anthropic APIキーが設定されていないため、自動生成できません。")
 
-    data_b64 = base64.standard_b64encode(file_bytes).decode("utf-8")
-    if media_type == "application/pdf":
-        file_block = {
-            "type": "document",
-            "source": {"type": "base64", "media_type": media_type, "data": data_b64},
-        }
-    else:
-        file_block = {
-            "type": "image",
-            "source": {"type": "base64", "media_type": media_type, "data": data_b64},
-        }
+    file_blocks = _prepare_file_blocks(file_bytes, media_type)
 
     prompt = _build_analysis_prompt(customer_name, project_name, start_date, total_days)
     client = anthropic.Anthropic(api_key=api_key)
@@ -196,7 +242,10 @@ def analyze_drawing_to_config(
                     "format": {"type": "json_schema", "schema": SCHEDULE_JSON_SCHEMA}
                 },
                 messages=[
-                    {"role": "user", "content": [file_block, {"type": "text", "text": prompt}]}
+                    {
+                        "role": "user",
+                        "content": [*file_blocks, {"type": "text", "text": prompt}],
+                    }
                 ],
             ) as stream:
                 response = stream.get_final_message()
