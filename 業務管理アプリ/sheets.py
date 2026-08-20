@@ -20,6 +20,8 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from gspread.utils import ValueInputOption
 
+import drive_storage
+
 TEMPLATE_SPREADSHEET_ID = "1-vIOJ7nWTUZi0ChwSSsc6N2j5mq-IX3eHjVHXYd-H-A"
 
 # サービスアカウントの鍵ファイル（JSON）は、ローカル開発ではこのファイルと同じ
@@ -399,3 +401,38 @@ def create_schedule_spreadsheet(
     new_id = new_file["id"]
     _share_with_service_account(drive_service, new_id)
     return new_id
+
+
+SCHEDULE_LOGO_ASSET_PATH = (
+    Path(__file__).resolve().parent.parent
+    / ".claude"
+    / "skills"
+    / "工程表作成"
+    / "scripts"
+    / "assets"
+    / "corp_logo.png"
+)
+
+
+def get_or_upload_schedule_logo_url(user_credentials: UserCredentials) -> str | None:
+    """工程表の表紙用ロゴ画像をGoogleドライブにアップロード(未アップロードなら)し、
+    Googleスプレッドシートの=IMAGE()関数から参照できる直リンクURLを返す。
+
+    Googleスプレッドシートの「セル内に画像を挿入」機能はAPIから操作できないため、
+    代わりにIMAGE()関数でセルに収まる画像を表示する。IMAGE()はURL先の画像を
+    取得しにきてしまうため、この画像だけ「リンクを知っている全員が閲覧可」に
+    設定している（会社ロゴのため公開範囲上の問題はない）。
+    一度アップロードしたファイルは使い回し、毎回アップロードし直さない。
+    """
+    if not SCHEDULE_LOGO_ASSET_PATH.exists():
+        return None
+    folder_id = drive_storage.get_folder_path(user_credentials, "schedule_assets")
+    filename = "corp_logo.png"
+    file_id = drive_storage.find_file_id(user_credentials, folder_id, filename)
+    if file_id is None:
+        data = SCHEDULE_LOGO_ASSET_PATH.read_bytes()
+        file_id = drive_storage.upload_bytes(
+            user_credentials, folder_id, filename, data, mime_type="image/png"
+        )
+        drive_storage.make_public(user_credentials, file_id)
+    return f"https://drive.google.com/uc?export=view&id={file_id}"

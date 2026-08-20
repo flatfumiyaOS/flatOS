@@ -154,6 +154,21 @@ def save_or_update_file(
     return upload_bytes(user_credentials, folder_id, filename, data, mime_type)
 
 
+def make_public(user_credentials: UserCredentials, file_id: str) -> None:
+    """ファイルを「リンクを知っている全員が閲覧可」に設定する。
+
+    Googleスプレッドシートの=IMAGE()関数など、Sheets側から外部URLとして直接
+    取得する必要がある場合に使う（サービスアカウント共有だけでは、Sheetsの
+    IMAGE()関数からは読み込めないため）。
+    """
+    drive_service = _drive_service(user_credentials)
+    drive_service.permissions().create(
+        fileId=file_id,
+        body={"type": "anyone", "role": "reader"},
+        fields="id",
+    ).execute()
+
+
 def download_bytes(user_credentials: UserCredentials, file_id: str) -> bytes:
     drive_service = _drive_service(user_credentials)
     request = drive_service.files().get_media(fileId=file_id)

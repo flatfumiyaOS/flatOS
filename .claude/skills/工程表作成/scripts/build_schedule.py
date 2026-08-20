@@ -142,12 +142,17 @@ def _build_calendar(start: datetime.date, n_working_days: int):
 COVER_ROWS = 5  # 表紙用に確保する行数（本体をこの分だけ下にずらす。1〜5行目は空欄のまま）
 
 
-def _write_cover(ws) -> None:
+def _write_cover(ws, embed_logo: bool = True) -> None:
     """表紙エリア（1〜5行目）に、現場名・現場住所などの入力欄と固定情報を書き込む。
 
     「現場名」「現場住所」は現場監督が案件ごとに手入力する想定のため、ラベルのみ
     書き込み、値は空欄のままにする。工事担当・営業担当・注意書きは毎回同じ内容の
     固定値として書き込む。
+
+    embed_logo: Falseにすると、AM2:AT3セルの結合・枠線は行うがロゴ画像自体は
+    埋め込まない。Googleスプレッドシートへ変換した後にIMAGE()関数でセル内に
+    収まるロゴを別途設定する運用（業務管理アプリのpages/4_工程表.py）で使う。
+    xlsxを単体で使う（スキルを手動で使う）場合はTrueのまま画像を埋め込む。
     """
     ws.merge_cells('C1:D2')
     ws['C1'] = '現場名'
@@ -218,7 +223,7 @@ def _write_cover(ws) -> None:
     # ロゴ画像（AM2:AT3セルを結合し、その中に貼り付ける）
     ws.merge_cells('AM2:AT3')
     _style_range(ws, 'AM2:AT3', border=GRID_BORDER)
-    if LOGO_PATH.exists():
+    if embed_logo and LOGO_PATH.exists():
         img = XLImage(str(LOGO_PATH))
         # セル結合の見た目に収まる程度のサイズに縮小する（元画像は960x204）
         img.width = 240
@@ -226,7 +231,7 @@ def _write_cover(ws) -> None:
         ws.add_image(img, 'AM2')
 
 
-def build(config: dict, out_path: str):
+def build(config: dict, out_path: str, embed_logo: bool = True):
     start = datetime.date.fromisoformat(config['start_date'])
     n_working_days = int(config['total_days'])
     dates, working_col = _build_calendar(start, n_working_days)
@@ -262,7 +267,7 @@ def build(config: dict, out_path: str):
     ws.row_dimensions[4].height = 31
     ws.row_dimensions[5].height = 11
 
-    _write_cover(ws)
+    _write_cover(ws, embed_logo=embed_logo)
 
     month_ranges = []
     seg_start = 0

@@ -153,10 +153,15 @@ else:
                                 int(total_days),
                             )
 
+                            credentials = google_auth.get_credentials()
+
                             with tempfile.TemporaryDirectory() as tmp_dir:
                                 xlsx_path = str(Path(tmp_dir) / "schedule.xlsx")
+                                # ロゴはxlsxには埋め込まず、Googleスプレッドシートへ変換後に
+                                # IMAGE()関数でセルに収まる形で表示する
+                                # （「セル内に画像を挿入」はAPI非対応のため）。
                                 _, end_col = schedule_generator.build_schedule_xlsx(
-                                    config, xlsx_path
+                                    config, xlsx_path, embed_logo=False
                                 )
 
                                 date_str = datetime.date.today().strftime("%Y%m%d")
@@ -165,7 +170,7 @@ else:
                                     f"{project_name.strip()}"
                                 )
                                 new_id = sheets.create_schedule_spreadsheet(
-                                    xlsx_path, file_name, google_auth.get_credentials()
+                                    xlsx_path, file_name, credentials
                                 )
 
                             # B列以降の列幅をピクセル単位で統一する（ユーザー希望）。
@@ -176,6 +181,13 @@ else:
                             sheets.set_column_width(
                                 new_id, sheet_name, 2, end_col, SCHEDULE_COLUMN_WIDTH_PX
                             )
+
+                            # ロゴをAM2セル(AM2:AT3を結合済み)にIMAGE()関数で表示する。
+                            logo_url = sheets.get_or_upload_schedule_logo_url(credentials)
+                            if logo_url:
+                                sheets.write_cell(
+                                    new_id, sheet_name, "AM2", f'=IMAGE("{logo_url}", 1)'
+                                )
 
                             new_record = schedule_store.add_schedule(
                                 customer_name_selection, project_name.strip(), new_id, file_name
