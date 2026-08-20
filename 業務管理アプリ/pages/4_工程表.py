@@ -21,7 +21,7 @@ from db import get_all_customers
 from layout import APP_ICON_PATH, show_header
 
 # B列以降の列幅（ピクセル）。新規作成した工程表には自動的にこの幅を適用する。
-SCHEDULE_COLUMN_WIDTH_PX = 50
+SCHEDULE_COLUMN_WIDTH_PX = 33
 
 st.set_page_config(page_title="工程表", page_icon=str(APP_ICON_PATH), layout="wide")
 auth_gate.require_password()
@@ -155,7 +155,9 @@ else:
 
                             with tempfile.TemporaryDirectory() as tmp_dir:
                                 xlsx_path = str(Path(tmp_dir) / "schedule.xlsx")
-                                schedule_generator.build_schedule_xlsx(config, xlsx_path)
+                                _, end_col = schedule_generator.build_schedule_xlsx(
+                                    config, xlsx_path
+                                )
 
                                 date_str = datetime.date.today().strftime("%Y%m%d")
                                 file_name = (
@@ -167,12 +169,13 @@ else:
                                 )
 
                             # B列以降の列幅をピクセル単位で統一する（ユーザー希望）。
+                            # 実際に使われた最終列(end_col)はbuild_schedule_xlsxの戻り値から
+                            # 直接使う。Sheets APIのget_column_count()はGoogleスプレッド
+                            # シートへの変換直後だと値が不正確なことがあったため使わない。
                             sheet_name = config.get("sheet_name", "工程表")
-                            column_count = sheets.get_column_count(new_id, sheet_name)
-                            if column_count >= 2:
-                                sheets.set_column_width(
-                                    new_id, sheet_name, 2, column_count, SCHEDULE_COLUMN_WIDTH_PX
-                                )
+                            sheets.set_column_width(
+                                new_id, sheet_name, 2, end_col, SCHEDULE_COLUMN_WIDTH_PX
+                            )
 
                             new_record = schedule_store.add_schedule(
                                 customer_name_selection, project_name.strip(), new_id, file_name

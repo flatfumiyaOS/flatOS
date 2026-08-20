@@ -32,6 +32,12 @@ SCHEDULE_RULES = """\
 - 工種（行）は、図面・仕様書の内容に合わせて過不足なく選ぶこと。使わない工種は入れない。
   代表的な工種の例: 仮設工事、解体工事、造作工事、電気工事、給排水・ガス設備工事、
   空調工事、内装仕上げ工事、竣工クリーニングなど。
+- 同じ工種の中に複数の異なる作業がある場合（例: 造作工事の中に「ボード下地組み」と
+  「ボード貼り」がある）は、日付が重なっていなくても1つの行のtasksにまとめず、
+  同じlabelを持つ行をrows内で連続して複数並べること（例:
+  {"label": "造作工事", "tasks": [...]} を2つ連続で並べる。noiseの値も揃えること）。
+  1つの行のtasksに複数の作業をまとめてよいのは、表示上どうしても1行に収めたい
+  ごく短い付随作業のみとし、基本は「1作業=1行」を優先する。
 - 各工種の行の中で、日付範囲（start_day〜end_day）が重ならないようにすること
   （重ねたい場合はその工種の行を分けて別の行にする）。別の工種（別の行）同士なら
   同じ日程で重なってよい（並行作業）。
@@ -265,7 +271,10 @@ def analyze_drawing_to_config(
     return config
 
 
-def build_schedule_xlsx(config: dict, out_path: str) -> str:
-    """「工程表作成」スキルの生成スクリプト（build_schedule.py）をそのまま使ってxlsxを作る。"""
+def build_schedule_xlsx(config: dict, out_path: str) -> tuple[str, int]:
+    """「工程表作成」スキルの生成スクリプト（build_schedule.py）をそのまま使ってxlsxを作る。
+
+    戻り値は (出力ファイルパス, 実際に使われた最終列番号=1始まり)。
+    """
     module = _load_build_schedule_module()
     return module.build(config, out_path)

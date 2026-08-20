@@ -68,6 +68,26 @@ TASK_ALIGN = Alignment(horizontal='left', vertical='center', wrap_text=False)
 
 GRID_SIDE = Side(style='thin', color='FFD9D9D9')
 GRID_BORDER = Border(left=GRID_SIDE, right=GRID_SIDE, top=GRID_SIDE, bottom=GRID_SIDE)
+COVER_LABEL_FILL = PatternFill(fill_type='solid', fgColor='FFF3F3F3')  # 極薄いグレー
+
+
+def _style_range(ws, cell_range: str, border=None, fill=None) -> None:
+    """指定したセル範囲（単一セルでも可）の全セルにborder/fillを適用する。
+
+    結合セルの内部セルにも適用しておかないと、Excel/Sheets側で結合を解除
+    した際に書式が抜けて見えるため、範囲内の全セルに対して設定する。
+    """
+    cells = ws[cell_range]
+    if not isinstance(cells, tuple):
+        cells = ((cells,),)
+    elif cells and not isinstance(cells[0], tuple):
+        cells = (cells,)
+    for row in cells:
+        for cell in row:
+            if border is not None:
+                cell.border = border
+            if fill is not None:
+                cell.fill = fill
 
 LOGO_PATH = Path(__file__).parent / "assets" / "corp_logo.png"
 
@@ -133,58 +153,71 @@ def _write_cover(ws) -> None:
     ws['C1'] = '現場名'
     ws['C1'].font = COVER_LABEL_FONT
     ws['C1'].alignment = LEFT_TOP_WRAP
+    _style_range(ws, 'C1:D2', border=GRID_BORDER, fill=COVER_LABEL_FILL)
 
     ws.merge_cells('C3:L4')
     ws['C3'] = '現場住所：'
     ws['C3'].font = COVER_LABEL_FONT
     ws['C3'].alignment = LEFT_TOP_WRAP
+    _style_range(ws, 'C3:L4', border=GRID_BORDER)
 
     ws.merge_cells('A2:A4')
     ws['A2'] = COVER_COMPANY_TITLE
     ws['A2'].font = TITLE_FONT
     ws['A2'].alignment = LEFT_TOP_WRAP
+    _style_range(ws, 'A2:A4', border=GRID_BORDER)
 
     ws.merge_cells('N1:W1')
     ws['N1'] = '工事情報'
     ws['N1'].font = COVER_LABEL_FONT
     ws['N1'].alignment = LEFT_TITLE
+    _style_range(ws, 'N1:W1', border=GRID_BORDER, fill=COVER_LABEL_FILL)
 
     ws.merge_cells('N2:O2')
     ws['N2'] = '工事期間'
     ws['N2'].font = COVER_LABEL_FONT
     ws['N2'].alignment = LEFT_TITLE
+    _style_range(ws, 'N2:O2', border=GRID_BORDER, fill=COVER_LABEL_FILL)
     ws['P2'] = '〜'
     ws['P2'].font = COVER_VALUE_FONT
     ws['P2'].alignment = LEFT_TITLE
+    _style_range(ws, 'P2', border=GRID_BORDER)
 
     ws.merge_cells('N3:O3')
     ws['N3'] = '工事担当'
     ws['N3'].font = COVER_LABEL_FONT
     ws['N3'].alignment = LEFT_TITLE
+    _style_range(ws, 'N3:O3', border=GRID_BORDER, fill=COVER_LABEL_FILL)
     ws['P3'] = COVER_SITE_SUPERVISOR
     ws['P3'].font = COVER_VALUE_FONT
     ws['P3'].alignment = LEFT_TITLE
+    _style_range(ws, 'P3', border=GRID_BORDER)
 
     ws.merge_cells('N4:O4')
     ws['N4'] = '営業担当'
     ws['N4'].font = COVER_LABEL_FONT
     ws['N4'].alignment = LEFT_TITLE
+    _style_range(ws, 'N4:O4', border=GRID_BORDER, fill=COVER_LABEL_FILL)
     ws['P4'] = COVER_SALES_REP
     ws['P4'].font = COVER_VALUE_FONT
     ws['P4'].alignment = LEFT_TITLE
+    _style_range(ws, 'P4', border=GRID_BORDER)
 
     ws.merge_cells('Y1:AK1')
     ws['Y1'] = '備考'
     ws['Y1'].font = COVER_LABEL_FONT
     ws['Y1'].alignment = LEFT_TITLE
+    _style_range(ws, 'Y1:AK1', border=GRID_BORDER, fill=COVER_LABEL_FILL)
 
     ws.merge_cells('Y2:AK4')
     ws['Y2'] = COVER_NOTE
     ws['Y2'].font = COVER_NOTE_FONT
     ws['Y2'].alignment = LEFT_TOP_WRAP
+    _style_range(ws, 'Y2:AK4', border=GRID_BORDER)
 
     # ロゴ画像（AM2:AT3セルを結合し、その中に貼り付ける）
     ws.merge_cells('AM2:AT3')
+    _style_range(ws, 'AM2:AT3', border=GRID_BORDER)
     if LOGO_PATH.exists():
         img = XLImage(str(LOGO_PATH))
         # セル結合の見た目に収まる程度のサイズに縮小する（元画像は960x204）
@@ -203,11 +236,14 @@ def build(config: dict, out_path: str):
     ws = wb.active
     ws.title = config.get('sheet_name', '工程表')
 
-    # 列幅: A=工種名(広め), B=着工日(狭め,例に合わせる), C以降=標準幅
+    # 列幅: A=工種名(広め)、B列以降は全て固定幅にする。
+    # xlsx上のこの幅指定はGoogleスプレッドシートへの変換時に正しく反映されないことが
+    # あるため、実際にGoogleスプレッドシートへ変換した後は、呼び出し側
+    # (schedule_generator.build_schedule_xlsx の戻り値)を使ってSheets APIから
+    # ピクセル単位で改めて指定し直す(pages/4_工程表.py参照)。
     ws.column_dimensions['A'].width = 32
-    ws.column_dimensions['B'].width = 4.25
-    for i in range(3, n_cols + 2):
-        ws.column_dimensions[get_column_letter(i)].width = 12.63
+    for i in range(2, n_cols + 2):
+        ws.column_dimensions[get_column_letter(i)].width = 4.25
 
     first_col = 2  # B列が1日目
 
@@ -321,7 +357,10 @@ def build(config: dict, out_path: str):
 
     ws.freeze_panes = f'B{start_row}'
     wb.save(out_path)
-    return out_path
+    # end_col: 実際に使われた最終列（1始まりの列番号、A=1）。
+    # Googleスプレッドシート変換後に列幅をSheets APIで指定し直す際、
+    # get_column_count()などGoogle側の値に頼らず正確な範囲を渡せるようにするため返す。
+    return out_path, end_col
 
 
 if __name__ == '__main__':
@@ -330,5 +369,5 @@ if __name__ == '__main__':
         sys.exit(1)
     with open(sys.argv[1], encoding='utf-8') as f:
         cfg = json.load(f)
-    path = build(cfg, sys.argv[2])
-    print('saved:', path)
+    saved_path, saved_end_col = build(cfg, sys.argv[2])
+    print('saved:', saved_path, 'end_col:', saved_end_col)

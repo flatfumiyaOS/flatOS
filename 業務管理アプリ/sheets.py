@@ -260,6 +260,46 @@ def set_cell_color(
     )
 
 
+def set_border(
+    spreadsheet_id: str,
+    sheet_name: str,
+    start_row: int,
+    end_row: int,
+    start_col: int,
+    end_col: int,
+    red: float = 0.85,
+    green: float = 0.85,
+    blue: float = 0.85,
+) -> None:
+    """指定したセル範囲の全セルに、指定色の細い罫線を四辺とも設定する（既定は薄いグレー）。"""
+    spreadsheet = _get_spreadsheet(spreadsheet_id)
+    worksheet = spreadsheet.worksheet(sheet_name)
+    side = {"style": "SOLID", "width": 1, "color": {"red": red, "green": green, "blue": blue}}
+    spreadsheet.batch_update(
+        {
+            "requests": [
+                {
+                    "updateBorders": {
+                        "range": {
+                            "sheetId": worksheet.id,
+                            "startRowIndex": start_row - 1,
+                            "endRowIndex": end_row,
+                            "startColumnIndex": start_col - 1,
+                            "endColumnIndex": end_col,
+                        },
+                        "top": side,
+                        "bottom": side,
+                        "left": side,
+                        "right": side,
+                        "innerHorizontal": side,
+                        "innerVertical": side,
+                    }
+                }
+            ]
+        }
+    )
+
+
 def get_column_count(spreadsheet_id: str, sheet_name: str) -> int:
     """指定したシートの列数（グリッドの実際の列数）を返す。"""
     worksheet = _get_spreadsheet(spreadsheet_id).worksheet(sheet_name)
