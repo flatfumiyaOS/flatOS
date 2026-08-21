@@ -12,5 +12,4 @@ requests==2.32.5
 openpyxl==3.1.5
 jpholiday==1.0.3
 Pillow==11.3.0
-extra-streamlit-components==0.1.81
 PyMuPDF==1.26.5

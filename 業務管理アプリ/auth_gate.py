@@ -9,6 +9,17 @@
 作り直されてしまうため、session_stateだけで認証状態を覚えていると、Googleログイン
 のたびにパスワードを二重に聞かれてしまう。これを避けるため、認証済みの状態を
 ブラウザのCookieにも保存し、一定期間はパスワード再入力を省略できるようにする。
+
+Cookieの読み取りには st.context.cookies を使う（ブラウザが送ってきたHTTP
+リクエストのCookieヘッダーをそのまま同期的に読めるStreamlit標準の仕組み）。
+以前はextra_streamlit_componentsのCookieManagerコンポーネントを使っていたが、
+あれはブラウザ側との通信が非同期のため、ページ再読み込み直後の最初のスクリプト
+実行ではまだ値を受け取れておらず、実際にはCookieが残っているのに再ログインを
+求められてしまう不具合があった。st.context.cookiesならその往復を待つ必要が
+無く、再読み込み直後から確実に読み取れる。
+書き込み側（ログイン成功時にCookieをセットする部分）だけは、Streamlitに
+Cookie書き込みの標準APIが無いため、JavaScriptでdocument.cookieを直接
+設定する方法を使う。
 """
 
 from __future__ import annotations
@@ -16,8 +27,8 @@ from __future__ import annotations
 import hashlib
 import time
 
-import extra_streamlit_components as stx
 import streamlit as st
+import streamlit.components.v1 as components
 
 COOKIE_NAME = "flatos_authenticated"
 COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60  # 30日
@@ -26,6 +37,24 @@ COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60  # 30日
 def _password_token(password: str) -> str:
     # Cookieには実際のパスワードそのものではなく、そのハッシュ値だけを保存する。
     return hashlib.sha256(password.encode()).hexdigest()
+
+
+def _set_auth_cookie(token: str) -> None:
+    is_https = str(st.context.url).startswith("https")
+    secure_attr = "; Secure" if is_https else ""
+    components.html(
+        f"""
+        <script>
+        (function() {{
+            const doc = window.parent.document;
+            doc.cookie = "{COOKIE_NAME}={token}; path=/; max-age={COOKIE_MAX_AGE_SECONDS}; "
+                + "SameSite=Lax{secure_attr}";
+        }})();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
 
 
 def require_password() -> None:
@@ -39,8 +68,7 @@ def require_password() -> None:
     if st.session_state.get("app_authenticated"):
         return
 
-    cookie_manager = stx.CookieManager(key="auth_cookie_manager")
-    if cookie_manager.get(COOKIE_NAME) == _password_token(required_password):
+    if st.context.cookies.get(COOKIE_NAME) == _password_token(required_password):
         st.session_state["app_authenticated"] = True
         return
 
@@ -49,13 +77,8 @@ def require_password() -> None:
     if st.button("入る", key="app_password_submit"):
         if entered == required_password:
             st.session_state["app_authenticated"] = True
-            cookie_manager.set(
-                COOKIE_NAME,
-                _password_token(required_password),
-                key="app_password_cookie_set",
-                max_age=COOKIE_MAX_AGE_SECONDS,
-            )
-            time.sleep(0.5)  # Cookie書き込み用コンポーネントがブラウザ側で実行される猶予を与える
+            _set_auth_cookie(_password_token(required_password))
+            time.sleep(0.5)  # Cookie書き込み用のJSがブラウザ側で実行される猶予を与える
             st.rerun()
         else:
             st.error("パスワードが違います。")
