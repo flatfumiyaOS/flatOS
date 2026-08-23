@@ -173,6 +173,14 @@ if view_mode == "list":
     if not projects:
         st.info("まだ案件が登録されていません。「＋ 新規案件を登録」から作成してください。")
     else:
+        has_archived = any(p.get("archived") for p in projects)
+        show_archived = False
+        if has_archived:
+            show_archived = st.checkbox(
+                "非表示にした案件も表示する", value=False, key="show_archived_projects"
+            )
+        visible_projects = projects if show_archived else [p for p in projects if not p.get("archived")]
+
         status_filter = st.pills(
             "絞り込み",
             options=STATUS_FILTER_OPTIONS,
@@ -184,11 +192,11 @@ if view_mode == "list":
 
         today = datetime.date.today()
         if status_filter == "すべて":
-            filtered_projects = projects
+            filtered_projects = visible_projects
         elif status_filter == STATUS_FILTER_ACTIVE:
-            filtered_projects = [p for p in projects if _project_status(p, today) == "施工中"]
+            filtered_projects = [p for p in visible_projects if _project_status(p, today) == "施工中"]
         else:
-            filtered_projects = [p for p in projects if _project_status(p, today) == status_filter]
+            filtered_projects = [p for p in visible_projects if _project_status(p, today) == status_filter]
 
         if not filtered_projects:
             st.caption("該当する案件がありません。")
@@ -284,6 +292,8 @@ elif view_mode == "detail":
 
     st.title(f"📁 {project['name']}")
     st.caption(f"顧客名: {project.get('customer_name') or '未設定'}")
+    if project.get("archived"):
+        st.warning("この案件は非表示に設定されています（案件一覧・会計画面には表示されません）。")
 
     tab1, tab2, tab3, tab4, tab5 = st.tabs(
         ["① 基本情報", "② 各種資料", "③ 工程表", "④ 現場写真", "⑤ 見積連携"]
@@ -344,6 +354,23 @@ elif view_mode == "detail":
                         selected_id, cover_photo_file.name, cover_photo_file.getvalue()
                     )
                 st.success("保存しました。")
+                st.rerun()
+
+        st.divider()
+        if project.get("archived"):
+            st.caption("この案件は非表示になっています。データは削除されていません。")
+            if st.button("表示に戻す", key="unarchive_project_button"):
+                project_store.unarchive_project(selected_id)
+                st.success("表示に戻しました。")
+                st.rerun()
+        else:
+            st.caption(
+                "テストで作成した案件など、今後使わない案件はここで非表示にできます"
+                "（写真・見積書・原価データなどは削除されず、一覧・会計画面から見えなくなるだけです）。"
+            )
+            if st.button("この案件を非表示にする", key="archive_project_button"):
+                project_store.archive_project(selected_id)
+                st.success("非表示にしました。")
                 st.rerun()
 
     with tab2:

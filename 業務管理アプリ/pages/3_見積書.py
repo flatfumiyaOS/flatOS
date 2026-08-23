@@ -154,7 +154,7 @@ if not google_auth.is_logged_in():
     st.caption("新しい案件の見積書を作成するには、Googleアカウントでログインしてください。")
 else:
     NEW_PROJECT_CHOICE = "（新規に案件を作成）"
-    existing_projects = project_store.get_all_projects()
+    existing_projects = [p for p in project_store.get_all_projects() if not p.get("archived")]
     project_choice_options = [NEW_PROJECT_CHOICE] + [p["name"] for p in existing_projects]
     project_choice = st.selectbox(
         "案件を選択", options=project_choice_options, key="estimate_project_choice"

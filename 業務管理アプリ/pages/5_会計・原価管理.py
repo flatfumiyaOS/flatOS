@@ -31,7 +31,7 @@ google_auth.handle_login_redirect()
 show_header()
 st.title("会計・原価管理")
 
-projects = project_store.get_all_projects()
+projects = [p for p in project_store.get_all_projects() if not p.get("archived")]
 project_options = {p["id"]: p["name"] for p in projects}
 
 
@@ -385,7 +385,7 @@ with tab1:
 
     st.divider()
     st.markdown("#### 登録済みの原価データ（請求書・レシート）")
-    all_costs = cost_store.get_all_costs()
+    all_costs = [c for c in cost_store.get_all_costs() if c["project_id"] in project_options]
     if all_costs:
         st.dataframe(
             [
@@ -607,7 +607,7 @@ with tab3:
 
     st.divider()
     st.markdown("#### 請求一覧")
-    all_billings = billing_store.get_all_billings()
+    all_billings = [b for b in billing_store.get_all_billings() if b["project_id"] in project_options]
     if not all_billings:
         st.caption("まだ請求データがありません。")
     else:
@@ -640,7 +640,7 @@ with tab3:
 
 with tab4:
     st.subheader("支払管理（業者・店舗別）")
-    all_costs = cost_store.get_all_costs()
+    all_costs = [c for c in cost_store.get_all_costs() if c["project_id"] in project_options]
     if not all_costs:
         st.info("まだ原価データが登録されていません。")
     else:
@@ -682,8 +682,8 @@ with tab4:
 with tab5:
     st.subheader("収支ダッシュボード")
 
-    all_costs = cost_store.get_all_costs()
-    all_billings = billing_store.get_all_billings()
+    all_costs = [c for c in cost_store.get_all_costs() if c["project_id"] in project_options]
+    all_billings = [b for b in billing_store.get_all_billings() if b["project_id"] in project_options]
 
     total_revenue = 0
     project_summaries = []

@@ -65,12 +65,23 @@ def create_project(name: str) -> dict:
         "cover_photo": None,
         "spreadsheet_id": None,
         "schedule_spreadsheet_id": None,
+        "archived": False,
         "created_at": now,
         "updated_at": now,
     }
     projects.append(project)
     _save_all(projects)
     return project
+
+
+def archive_project(project_id: int) -> None:
+    """案件を非表示にする（データは削除せず、一覧・会計画面などから除外する）。"""
+    _update_project(project_id, archived=True)
+
+
+def unarchive_project(project_id: int) -> None:
+    """非表示にした案件を、再び表示に戻す。"""
+    _update_project(project_id, archived=False)
 
 
 def get_or_create_project(name: str) -> dict:
