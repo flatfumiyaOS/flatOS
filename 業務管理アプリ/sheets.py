@@ -9,6 +9,7 @@ Googleアカウント（OAuthログイン）の権限で行う必要がある。
 
 from __future__ import annotations
 
+import datetime
 import json
 from pathlib import Path
 
@@ -324,19 +325,22 @@ def _share_with_service_account(drive_service, file_id: str) -> None:
 
 def create_estimate_spreadsheet(project_name: str, user_credentials: UserCredentials) -> str:
     """テンプレートをユーザー本人のGoogleアカウントの権限でコピーし、
-    案件名の新しい見積書スプレッドシートを作成する。
+    新しい見積書スプレッドシートを作成する。
 
+    ファイル名は「見積書 YYYYMMDD 案件名」の形式にする（作成日の日付）。
     サービスアカウントには保存容量が無いため、コピーの実行はユーザー本人の
     権限（OAuthログイン）で行う。作成後、チャットからも読み書きできるよう、
     サービスアカウントにも編集権限を共有しておく。
     """
     drive_service = build("drive", "v3", credentials=user_credentials)
 
+    date_str = datetime.date.today().strftime("%Y%m%d")
+    title = f"見積書 {date_str} {project_name}"
     new_file = (
         drive_service.files()
         .copy(
             fileId=TEMPLATE_SPREADSHEET_ID,
-            body={"name": project_name},
+            body={"name": title},
             supportsAllDrives=True,
         )
         .execute()
