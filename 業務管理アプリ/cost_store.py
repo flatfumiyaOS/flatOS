@@ -168,3 +168,10 @@ def set_paid(cost_id: int, paid: bool) -> None:
             c["updated_at"] = _now()
             break
     _save_all(costs)
+
+
+def delete_costs_for_project(project_id: int) -> None:
+    """指定した案件に紐づく原価データを削除する（案件そのものの削除時に使う）。"""
+    costs = _load_all()
+    remaining = [c for c in costs if c["project_id"] != project_id]
+    _save_all(remaining)

@@ -363,6 +363,30 @@ elif view_mode == "detail":
                 project_store.unarchive_project(selected_id)
                 st.success("表示に戻しました。")
                 st.rerun()
+
+            st.divider()
+            st.markdown("##### この案件を完全に削除する")
+            st.caption(
+                "この操作は元に戻せません。写真・資料・原価データ・顧客請求データが"
+                "すべて削除されます。Googleにログインしていれば、写真・見積書・工程表の"
+                "Googleドライブ上のファイルもゴミ箱に移動します（ログインしていない場合、"
+                "Googleドライブ上のファイルはそのまま残ります）。"
+            )
+            confirm_name = st.text_input(
+                f"削除するには案件名「{project['name']}」を入力してください",
+                key="delete_project_confirm_input",
+            )
+            if st.button(
+                "この案件を完全に削除する",
+                key="delete_project_button",
+                type="primary",
+                disabled=(confirm_name != project["name"]),
+            ):
+                credentials = google_auth.get_credentials() if google_auth.is_logged_in() else None
+                project_store.delete_project(selected_id, credentials)
+                st.success("削除しました。")
+                _go_to_list()
+                st.rerun()
         else:
             st.caption(
                 "テストで作成した案件など、今後使わない案件はここで非表示にできます"

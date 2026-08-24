@@ -90,3 +90,10 @@ def set_status(billing_id: int, status: str) -> None:
             b["updated_at"] = _now()
             break
     _save_all(billings)
+
+
+def delete_billings_for_project(project_id: int) -> None:
+    """指定した案件に紐づく顧客請求データを削除する（案件そのものの削除時に使う）。"""
+    billings = _load_all()
+    remaining = [b for b in billings if b["project_id"] != project_id]
+    _save_all(remaining)

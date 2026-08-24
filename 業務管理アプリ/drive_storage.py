@@ -169,6 +169,17 @@ def make_public(user_credentials: UserCredentials, file_id: str) -> None:
     ).execute()
 
 
+def trash_file(user_credentials: UserCredentials, file_id: str) -> None:
+    """ファイルをゴミ箱に移動する（完全削除ではなく、Googleドライブ上で復元可能な状態にする）。
+
+    案件データの削除など、ユーザー本人の明示的な許可を得たうえでファイルを削除する
+    場合に使う。完全削除(files().delete)ではなくゴミ箱移動にしているのは、誤って
+    削除してしまった場合にGoogleドライブ側の「ゴミ箱」から復元できるようにするため。
+    """
+    drive_service = _drive_service(user_credentials)
+    drive_service.files().update(fileId=file_id, body={"trashed": True}).execute()
+
+
 def download_bytes(user_credentials: UserCredentials, file_id: str) -> bytes:
     drive_service = _drive_service(user_credentials)
     request = drive_service.files().get_media(fileId=file_id)

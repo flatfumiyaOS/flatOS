@@ -13,6 +13,8 @@ from pathlib import Path
 
 from PIL import Image, ImageOps
 
+import billing_store
+import cost_store
 import drive_storage
 import google_auth
 
@@ -82,6 +84,59 @@ def archive_project(project_id: int) -> None:
 def unarchive_project(project_id: int) -> None:
     """非表示にした案件を、再び表示に戻す。"""
     _update_project(project_id, archived=False)
+
+
+def _trash_record_file(record: dict, user_credentials) -> None:
+    """写真・資料1件分のローカルファイルを削除し、可能ならGoogleドライブ側もゴミ箱に移動する。"""
+    path = Path(record.get("path", ""))
+    if path.exists():
+        try:
+            path.unlink()
+        except OSError:
+            pass
+    drive_file_id = record.get("drive_file_id")
+    if drive_file_id and user_credentials is not None:
+        try:
+            drive_storage.trash_file(user_credentials, drive_file_id)
+        except Exception:
+            pass
+
+
+def delete_project(project_id: int, user_credentials=None) -> None:
+    """案件を完全に削除する。
+
+    CLAUDE.mdの方針上、ユーザー本人の明示的な許可を得たうえでのみ呼び出すこと。
+    案件本体（projects.json）に加えて、紐づく原価データ・顧客請求データも削除する。
+    写真・資料のローカルファイルも削除し、user_credentials（ログイン中のGoogle
+    アカウント）が渡されていれば、Googleドライブ上の写真・資料・見積書/工程表
+    スプレッドシートも合わせてゴミ箱に移動する（完全削除ではなく復元可能な状態にする）。
+    user_credentialsが無い場合、Googleドライブ上のファイルはそのまま残る
+    （ローカルのデータだけが削除される）。
+    """
+    projects = _load_all()
+    project = next((p for p in projects if p["id"] == project_id), None)
+    if project is None:
+        return
+
+    for record in (project.get("photos") or []) + (project.get("documents") or []):
+        _trash_record_file(record, user_credentials)
+    if project.get("cover_photo"):
+        _trash_record_file(project["cover_photo"], user_credentials)
+
+    if user_credentials is not None:
+        for field in ("spreadsheet_id", "schedule_spreadsheet_id"):
+            file_id = project.get(field)
+            if file_id:
+                try:
+                    drive_storage.trash_file(user_credentials, file_id)
+                except Exception:
+                    pass
+
+    cost_store.delete_costs_for_project(project_id)
+    billing_store.delete_billings_for_project(project_id)
+
+    remaining = [p for p in projects if p["id"] != project_id]
+    _save_all(remaining)
 
 
 def get_or_create_project(name: str) -> dict:
