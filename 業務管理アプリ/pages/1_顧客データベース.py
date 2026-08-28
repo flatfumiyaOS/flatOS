@@ -36,10 +36,9 @@ with st.expander("新しい顧客を登録する", expanded=False):
     if add_is_corporate:
         # ご担当者の追加・削除ボタンをその場で反映する必要があるため、st.formの外で描画する。
         contact_fields.init_contact_count("add_customer", 1)
-        name, kana, address, contacts, memo = contact_fields.render_corporate_fields(
+        name, kana, phone, email, address, contacts, memo = contact_fields.render_corporate_fields(
             "add_customer", name_label="会社名 *"
         )
-        phone, email = "", ""
 
         if st.button("登録する", key="add_customer_submit"):
             if not name.strip():
@@ -95,16 +94,15 @@ else:
     for r in rows:
         is_corp = r["entity_type"] == "法人"
         contacts = contact_fields.contacts_from_json(r["contacts_json"]) if is_corp else []
-        rep_phone, rep_email, contact_names = contact_fields.summarize_contacts(contacts)
         df_rows.append(
             {
                 "区分": "法人" if is_corp else "個人",
                 "氏名・会社名": r["name"],
                 "フリガナ": r["kana"],
-                "電話番号": rep_phone if is_corp else r["phone"],
-                "メール": rep_email if is_corp else r["email"],
+                "電話番号": r["phone"],
+                "メール": r["email"],
                 "住所": r["address"],
-                "ご担当者": contact_names,
+                "ご担当者": contact_fields.contact_names(contacts),
                 "更新日": r["updated_at"],
             }
         )
@@ -136,16 +134,17 @@ else:
         if edit_is_corporate:
             # ご担当者の追加・削除ボタンをその場で反映する必要があるため、st.formの外で描画する。
             contact_fields.init_contact_count(edit_key_prefix, len(existing_contacts) or 1)
-            e_name, e_kana, e_address, e_contacts, e_memo = contact_fields.render_corporate_fields(
+            e_name, e_kana, e_phone, e_email, e_address, e_contacts, e_memo = contact_fields.render_corporate_fields(
                 edit_key_prefix,
                 name_label="会社名 *",
                 name_value=customer["name"],
                 kana_value=customer["kana"] or "",
+                phone_value=customer["phone"] or "",
+                email_value=customer["email"] or "",
                 address_value=customer["address"] or "",
                 memo_value=customer["memo"] or "",
                 contacts_value=existing_contacts,
             )
-            e_phone, e_email = "", ""
 
             col_save, col_delete = st.columns(2)
             with col_save:

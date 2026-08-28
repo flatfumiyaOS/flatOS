@@ -70,7 +70,7 @@ def clear_fields(key_prefix: str) -> None:
         st.session_state.pop(f"{key_prefix}_contact_name_{i}", None)
         st.session_state.pop(f"{key_prefix}_contact_phone_{i}", None)
         st.session_state.pop(f"{key_prefix}_contact_email_{i}", None)
-    for suffix in ("name", "kana", "address", "memo"):
+    for suffix in ("name", "kana", "phone", "email", "address", "memo"):
         st.session_state.pop(f"{key_prefix}_{suffix}", None)
 
 
@@ -109,13 +109,19 @@ def render_corporate_fields(
     memo_label: str = "備考",
     name_value: str = "",
     kana_value: str = "",
+    phone_value: str = "",
+    email_value: str = "",
     address_value: str = "",
     memo_value: str = "",
     contacts_value: list[dict] | None = None,
 ):
     """法人用の入力欄一式を描画する。st.formの外で、呼び出し前にinit_contact_countが必要。
 
-    戻り値: (name, kana, address, contacts, memo)。contactsは
+    会社の代表電話番号・メールアドレスは、個々のご担当者の連絡先とは別に、
+    会社情報として入力できるようにする（会社の代表番号・住所が担当者個人の
+    連絡先と異なる場合があるため）。
+
+    戻り値: (name, kana, phone, email, address, contacts, memo)。contactsは
     {"name":..., "phone":..., "email":...} のリスト（未入力の行は呼び出し側で除外する想定）。
     """
     contacts_value = contacts_value or []
@@ -124,7 +130,9 @@ def render_corporate_fields(
     with col1:
         name = _text_input(name_label, value=name_value, key=f"{key_prefix}_name")
         kana = _text_input("フリガナ", value=kana_value, key=f"{key_prefix}_kana")
+        phone = _text_input("電話番号（会社の代表番号）", value=phone_value, key=f"{key_prefix}_phone")
     with col2:
+        email = _text_input("メールアドレス（会社の代表アドレス）", value=email_value, key=f"{key_prefix}_email")
         address = _text_input("住所", value=address_value, key=f"{key_prefix}_address")
 
     st.markdown("**ご担当者**")
@@ -167,7 +175,7 @@ def render_corporate_fields(
         st.rerun()
 
     memo = _text_area(memo_label, value=memo_value, key=f"{key_prefix}_memo")
-    return name, kana, address, contacts, memo
+    return name, kana, phone, email, address, contacts, memo
 
 
 def clean_contacts(contacts: list[dict]) -> list[dict]:
@@ -175,10 +183,6 @@ def clean_contacts(contacts: list[dict]) -> list[dict]:
     return [c for c in contacts if c.get("name") or c.get("phone") or c.get("email")]
 
 
-def summarize_contacts(contacts: list[dict]):
-    """一覧表示用に、代表の電話番号・メールと担当者名の一覧を返す。"""
-    if not contacts:
-        return "", "", ""
-    first = contacts[0]
-    names = "、".join(c.get("name", "") for c in contacts if c.get("name"))
-    return first.get("phone", ""), first.get("email", ""), names
+def contact_names(contacts: list[dict]) -> str:
+    """一覧表示用に、担当者名を「、」区切りで並べた文字列を返す。"""
+    return "、".join(c.get("name", "") for c in contacts if c.get("name"))
