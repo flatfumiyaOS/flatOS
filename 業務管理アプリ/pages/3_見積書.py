@@ -7,6 +7,7 @@ import re
 import streamlit as st
 
 import auth_gate
+import contact_fields
 import google_auth
 import project_store
 import sheets
@@ -22,7 +23,7 @@ ESTIMATE_ITEM_ROW_HEIGHT_PX = 28
 
 
 def _format_customer_honorific(name: str) -> str:
-    """顧客名を、テンプレートの例（「石田　なつえ 様」）と同じ形式にする。
+    """氏名を、テンプレートの例（「石田　なつえ 様」）と同じ形式にする。
 
     苗字と名前の間は全角スペース、「様」の前は半角スペース。姓名の区切りが
     分からない場合は、名前全体の末尾にそのまま「 様」を付ける。
@@ -33,14 +34,77 @@ def _format_customer_honorific(name: str) -> str:
     return name.strip() + " 様"
 
 
-def _fill_estimate_defaults(spreadsheet_id: str, customer_row, project_name: str) -> None:
+def _compute_honorific_fields(customer_row: dict) -> tuple[str, str]:
+    """顧客の区分に応じて、(A9・B4に入れる宛名, B3に入れる会社名) を返す。
+
+    - 個人: 氏名+「様」（今まで通り）。B3は使わない。
+    - 法人でご担当者が未登録: 会社名+「御中」。B3は使わない。
+    - 法人でご担当者が登録済み: 最初のご担当者の氏名+「様」。B3に会社名を入れる。
+    """
+    name = (customer_row.get("name") or "").strip()
+    entity_type = customer_row.get("entity_type") or "個人"
+    if entity_type != "法人":
+        return _format_customer_honorific(name), ""
+
+    contacts = contact_fields.contacts_from_json(customer_row.get("contacts_json"))
+    first_contact_name = (contacts[0].get("name") or "").strip() if contacts else ""
+    if not first_contact_name:
+        return f"{name} 御中", ""
+    return _format_customer_honorific(first_contact_name), name
+
+
+def _find_previous_estimate_honorific(customer_name: str, exclude_project_id) -> dict | None:
+    """同じ顧客名で過去に見積書を作成した案件があれば、そこで使われている
+    A9・B3・B4セルの値をそのまま返す（後から手直しした表記も含めて引き継ぐため）。
+    見つからなければNoneを返す。
+    """
+    if not customer_name:
+        return None
+    candidates = [
+        p
+        for p in project_store.get_all_projects()
+        if p.get("customer_name") == customer_name
+        and p.get("spreadsheet_id")
+        and p["id"] != exclude_project_id
+    ]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda p: p.get("created_at", ""), reverse=True)
+    prev_spreadsheet_id = candidates[0]["spreadsheet_id"]
+    try:
+        a9 = sheets.read_cell(prev_spreadsheet_id, ESTIMATE_DETAIL_SHEET, "A9")
+        b3 = sheets.read_cell(prev_spreadsheet_id, ESTIMATE_DETAIL_SHEET, "B3")
+        b4 = sheets.read_cell(prev_spreadsheet_id, ESTIMATE_DETAIL_SHEET, "B4")
+    except Exception:
+        return None
+    if not a9 and not b4:
+        return None
+    return {"a9": a9 or "", "b3": b3 or "", "b4": b4 or ""}
+
+
+def _fill_estimate_defaults(
+    spreadsheet_id: str, customer_row, project_name: str, exclude_project_id=None
+) -> None:
     """新規作成した見積書に、顧客名・住所・郵便番号・案件名をあらかじめ入力しておく。"""
     if customer_row is not None:
-        honorific = _format_customer_honorific(customer_row["name"])
-        sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "B4", honorific)
-        sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "A9", honorific)
+        customer_row = dict(customer_row)
+        name = (customer_row.get("name") or "").strip()
 
-        address = (customer_row["address"] or "").strip()
+        previous = _find_previous_estimate_honorific(name, exclude_project_id)
+        if previous is not None:
+            # 同じ顧客の過去の見積書があれば、その表記（手直し済みの可能性がある）をそのまま引き継ぐ。
+            if previous["b3"]:
+                sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "B3", previous["b3"])
+            sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "B4", previous["b4"])
+            sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "A9", previous["a9"])
+        else:
+            honorific, company_name_for_b3 = _compute_honorific_fields(customer_row)
+            if company_name_for_b3:
+                sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "B3", company_name_for_b3)
+            sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "B4", honorific)
+            sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "A9", honorific)
+
+        address = (customer_row.get("address") or "").strip()
         if address:
             sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "B2", address)
             postal_code = lookup_postal_code(address)
@@ -201,25 +265,38 @@ else:
                             p for p in existing_projects if p["name"] == project_choice
                         )
                         project_name = linked_project_existing["name"]
+                        linked_customer_name = linked_project_existing.get("customer_name")
+                        # 案件が持つ住所（現場住所）はそのまま使いつつ、法人/ご担当者の
+                        # 判定に必要な情報は顧客データベース側の一致するレコードから補う。
+                        db_customer_row = next(
+                            (c for c in customers if c["name"] == linked_customer_name), None
+                        )
                         customer_row = (
                             {
-                                "name": linked_project_existing["customer_name"],
+                                "name": linked_customer_name,
                                 "address": linked_project_existing.get("address", ""),
+                                "entity_type": db_customer_row["entity_type"] if db_customer_row else "個人",
+                                "contacts_json": db_customer_row["contacts_json"] if db_customer_row else "[]",
                             }
-                            if linked_project_existing.get("customer_name")
+                            if linked_customer_name
                             else None
                         )
-
-                    new_id = sheets.create_estimate_spreadsheet(
-                        project_name, google_auth.get_credentials()
-                    )
-                    _fill_estimate_defaults(new_id, customer_row, project_name)
-                    _clear_old_example_rows(new_id)
 
                     # 案件管理にも案件として登録し、見積書スプレッドシートを紐付ける
                     # （案件を選択していればその案件に、新規作成であれば同じ名前の
                     # 既存案件があればそこに、無ければ新規作成して紐付ける）。
+                    # 過去の見積書検索で自分自身をヒットさせないよう、スプレッドシート
+                    # 作成前に案件IDを確定させておく。
                     linked_project = project_store.get_or_create_project(project_name)
+
+                    new_id = sheets.create_estimate_spreadsheet(
+                        project_name, google_auth.get_credentials()
+                    )
+                    _fill_estimate_defaults(
+                        new_id, customer_row, project_name, exclude_project_id=linked_project["id"]
+                    )
+                    _clear_old_example_rows(new_id)
+
                     project_store.set_spreadsheet_id(linked_project["id"], new_id)
 
                     st.session_state["current_spreadsheet_id"] = new_id
