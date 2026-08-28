@@ -71,6 +71,13 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+    """既存のテーブルに列が無ければ追加する（法人/担当者欄追加のための移行用）。"""
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+
+
 def init_db() -> None:
     conn = get_connection()
     conn.execute(
@@ -128,35 +135,42 @@ def init_db() -> None:
         )
         """
     )
+    # 法人/個人の区分と、法人の場合の複数担当者（氏名・電話番号・メールのセット）を
+    # 既存テーブルに追加。既存データはすべて「個人」扱いのまま今まで通り使える。
+    _ensure_column(conn, "customers", "entity_type", "entity_type TEXT NOT NULL DEFAULT '個人'")
+    _ensure_column(conn, "customers", "contacts_json", "contacts_json TEXT NOT NULL DEFAULT '[]'")
+    _ensure_column(conn, "vendors", "entity_type", "entity_type TEXT NOT NULL DEFAULT '個人'")
+    _ensure_column(conn, "vendors", "contacts_json", "contacts_json TEXT NOT NULL DEFAULT '[]'")
     conn.commit()
     conn.close()
 
 
-def add_customer(name, kana, phone, email, address, memo) -> None:
+def add_customer(name, kana, phone, email, address, memo, entity_type="個人", contacts=None) -> None:
     now = datetime.now().isoformat(timespec="seconds")
     conn = get_connection()
     conn.execute(
         """
-        INSERT INTO customers (name, kana, phone, email, address, memo, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO customers (name, kana, phone, email, address, memo, entity_type, contacts_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (name, kana, phone, email, address, memo, now, now),
+        (name, kana, phone, email, address, memo, entity_type, json.dumps(contacts or [], ensure_ascii=False), now, now),
     )
     conn.commit()
     conn.close()
     _backup_db_to_drive()
 
 
-def update_customer(customer_id, name, kana, phone, email, address, memo) -> None:
+def update_customer(customer_id, name, kana, phone, email, address, memo, entity_type="個人", contacts=None) -> None:
     now = datetime.now().isoformat(timespec="seconds")
     conn = get_connection()
     conn.execute(
         """
         UPDATE customers
-        SET name = ?, kana = ?, phone = ?, email = ?, address = ?, memo = ?, updated_at = ?
+        SET name = ?, kana = ?, phone = ?, email = ?, address = ?, memo = ?,
+            entity_type = ?, contacts_json = ?, updated_at = ?
         WHERE id = ?
         """,
-        (name, kana, phone, email, address, memo, now, customer_id),
+        (name, kana, phone, email, address, memo, entity_type, json.dumps(contacts or [], ensure_ascii=False), now, customer_id),
     )
     conn.commit()
     conn.close()
@@ -191,10 +205,10 @@ def search_customers(keyword: str):
     rows = conn.execute(
         """
         SELECT * FROM customers
-        WHERE name LIKE ? OR kana LIKE ? OR phone LIKE ? OR email LIKE ? OR address LIKE ?
+        WHERE name LIKE ? OR kana LIKE ? OR phone LIKE ? OR email LIKE ? OR address LIKE ? OR contacts_json LIKE ?
         ORDER BY id DESC
         """,
-        (like, like, like, like, like),
+        (like, like, like, like, like, like),
     ).fetchall()
     conn.close()
     return rows
@@ -259,31 +273,32 @@ def get_memory_notes(category: str):
     return rows
 
 
-def add_vendor(name, kana, phone, email, address, memo) -> None:
+def add_vendor(name, kana, phone, email, address, memo, entity_type="個人", contacts=None) -> None:
     now = datetime.now().isoformat(timespec="seconds")
     conn = get_connection()
     conn.execute(
         """
-        INSERT INTO vendors (name, kana, phone, email, address, memo, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO vendors (name, kana, phone, email, address, memo, entity_type, contacts_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (name, kana, phone, email, address, memo, now, now),
+        (name, kana, phone, email, address, memo, entity_type, json.dumps(contacts or [], ensure_ascii=False), now, now),
     )
     conn.commit()
     conn.close()
     _backup_db_to_drive()
 
 
-def update_vendor(vendor_id, name, kana, phone, email, address, memo) -> None:
+def update_vendor(vendor_id, name, kana, phone, email, address, memo, entity_type="個人", contacts=None) -> None:
     now = datetime.now().isoformat(timespec="seconds")
     conn = get_connection()
     conn.execute(
         """
         UPDATE vendors
-        SET name = ?, kana = ?, phone = ?, email = ?, address = ?, memo = ?, updated_at = ?
+        SET name = ?, kana = ?, phone = ?, email = ?, address = ?, memo = ?,
+            entity_type = ?, contacts_json = ?, updated_at = ?
         WHERE id = ?
         """,
-        (name, kana, phone, email, address, memo, now, vendor_id),
+        (name, kana, phone, email, address, memo, entity_type, json.dumps(contacts or [], ensure_ascii=False), now, vendor_id),
     )
     conn.commit()
     conn.close()
@@ -318,10 +333,10 @@ def search_vendors(keyword: str):
     rows = conn.execute(
         """
         SELECT * FROM vendors
-        WHERE name LIKE ? OR kana LIKE ? OR phone LIKE ? OR email LIKE ? OR address LIKE ?
+        WHERE name LIKE ? OR kana LIKE ? OR phone LIKE ? OR email LIKE ? OR address LIKE ? OR contacts_json LIKE ?
         ORDER BY id DESC
         """,
-        (like, like, like, like, like),
+        (like, like, like, like, like, like),
     ).fetchall()
     conn.close()
     return rows

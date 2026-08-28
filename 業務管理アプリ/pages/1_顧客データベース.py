@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 import auth_gate
+import contact_fields
 from chat import show_chat_panel, show_chat_toggle
 from db import (
     init_db,
@@ -24,24 +25,46 @@ show_header()
 st.title("顧客データベース")
 
 # --- 新規登録 ---
+if st.session_state.pop("_add_customer_reset", False):
+    st.session_state["add_customer_is_corporate"] = False
+    contact_fields.reset_contact_count("add_customer")
+
 with st.expander("新しい顧客を登録する", expanded=False):
+    add_is_corporate = st.checkbox("法人として登録する（チェックを外すと個人）", key="add_customer_is_corporate")
+
+    if add_is_corporate:
+        contact_fields.init_contact_count("add_customer", 1)
+        contact_fields.render_add_contact_button("add_customer")
+
     with st.form("add_customer_form", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        with col1:
-            name = st.text_input("氏名・会社名 *")
-            kana = st.text_input("フリガナ")
-            phone = st.text_input("電話番号")
-        with col2:
-            email = st.text_input("メールアドレス")
-            address = st.text_input("住所")
-        memo = st.text_area("備考")
+        if add_is_corporate:
+            name, kana, address, contacts, memo = contact_fields.render_corporate_fields(
+                "add_customer", name_label="会社名 *"
+            )
+            phone, email = "", ""
+        else:
+            col1, col2 = st.columns(2)
+            with col1:
+                name = st.text_input("氏名 *")
+                kana = st.text_input("フリガナ")
+                phone = st.text_input("電話番号")
+            with col2:
+                email = st.text_input("メールアドレス")
+                address = st.text_input("住所")
+            memo = st.text_area("備考")
+            contacts = []
 
         submitted = st.form_submit_button("登録する")
         if submitted:
             if not name.strip():
-                st.error("氏名・会社名は必須です。")
+                st.error("会社名は必須です。" if add_is_corporate else "氏名は必須です。")
             else:
-                add_customer(name.strip(), kana.strip(), phone.strip(), email.strip(), address.strip(), memo.strip())
+                add_customer(
+                    name.strip(), kana.strip(), phone.strip(), email.strip(), address.strip(), memo.strip(),
+                    entity_type="法人" if add_is_corporate else "個人",
+                    contacts=contact_fields.clean_contacts(contacts),
+                )
+                st.session_state["_add_customer_reset"] = True
                 st.success(f"「{name}」を登録しました。")
                 st.rerun()
 
@@ -57,19 +80,24 @@ st.write(f"登録件数: {len(rows)} 件")
 if not rows:
     st.info("該当する顧客が見つかりません。")
 else:
-    df = pd.DataFrame(
-        [
+    df_rows = []
+    for r in rows:
+        is_corp = r["entity_type"] == "法人"
+        contacts = contact_fields.contacts_from_json(r["contacts_json"]) if is_corp else []
+        rep_phone, rep_email, contact_names = contact_fields.summarize_contacts(contacts)
+        df_rows.append(
             {
+                "区分": "法人" if is_corp else "個人",
                 "氏名・会社名": r["name"],
                 "フリガナ": r["kana"],
-                "電話番号": r["phone"],
-                "メール": r["email"],
+                "電話番号": rep_phone if is_corp else r["phone"],
+                "メール": rep_email if is_corp else r["email"],
                 "住所": r["address"],
+                "ご担当者": contact_names,
                 "更新日": r["updated_at"],
             }
-            for r in rows
-        ]
-    )
+        )
+    df = pd.DataFrame(df_rows)
     st.dataframe(df, width="stretch", hide_index=True)
 
     st.divider()
@@ -84,17 +112,41 @@ else:
 
     if selected_id is not None:
         customer = next(r for r in rows if r["id"] == selected_id)
+        edit_key_prefix = f"edit_customer_{selected_id}"
+        existing_contacts = contact_fields.contacts_from_json(customer["contacts_json"])
+
+        edit_is_corporate = st.checkbox(
+            "法人として登録する（チェックを外すと個人）",
+            value=customer["entity_type"] == "法人",
+            key=f"{edit_key_prefix}_is_corporate",
+        )
+        if edit_is_corporate:
+            contact_fields.init_contact_count(edit_key_prefix, len(existing_contacts) or 1)
+            contact_fields.render_add_contact_button(edit_key_prefix)
 
         with st.form("edit_customer_form"):
-            col1, col2 = st.columns(2)
-            with col1:
-                e_name = st.text_input("氏名・会社名 *", value=customer["name"])
-                e_kana = st.text_input("フリガナ", value=customer["kana"] or "")
-                e_phone = st.text_input("電話番号", value=customer["phone"] or "")
-            with col2:
-                e_email = st.text_input("メールアドレス", value=customer["email"] or "")
-                e_address = st.text_input("住所", value=customer["address"] or "")
-            e_memo = st.text_area("備考", value=customer["memo"] or "")
+            if edit_is_corporate:
+                e_name, e_kana, e_address, e_contacts, e_memo = contact_fields.render_corporate_fields(
+                    edit_key_prefix,
+                    name_label="会社名 *",
+                    name_value=customer["name"],
+                    kana_value=customer["kana"] or "",
+                    address_value=customer["address"] or "",
+                    memo_value=customer["memo"] or "",
+                    contacts_value=existing_contacts,
+                )
+                e_phone, e_email = "", ""
+            else:
+                col1, col2 = st.columns(2)
+                with col1:
+                    e_name = st.text_input("氏名 *", value=customer["name"])
+                    e_kana = st.text_input("フリガナ", value=customer["kana"] or "")
+                    e_phone = st.text_input("電話番号", value=customer["phone"] or "")
+                with col2:
+                    e_email = st.text_input("メールアドレス", value=customer["email"] or "")
+                    e_address = st.text_input("住所", value=customer["address"] or "")
+                e_memo = st.text_area("備考", value=customer["memo"] or "")
+                e_contacts = []
 
             col_save, col_delete = st.columns(2)
             with col_save:
@@ -104,11 +156,13 @@ else:
 
             if save:
                 if not e_name.strip():
-                    st.error("氏名・会社名は必須です。")
+                    st.error("会社名は必須です。" if edit_is_corporate else "氏名は必須です。")
                 else:
                     update_customer(
                         selected_id, e_name.strip(), e_kana.strip(), e_phone.strip(),
                         e_email.strip(), e_address.strip(), e_memo.strip(),
+                        entity_type="法人" if edit_is_corporate else "個人",
+                        contacts=contact_fields.clean_contacts(e_contacts),
                     )
                     st.success("更新しました。")
                     st.rerun()
