@@ -1,7 +1,7 @@
-"""住所から郵便番号を調べるための共通部品。
+"""郵便番号と住所を相互に調べるための共通部品。
 
-HeartRails Geo API（無料・登録不要）を使い、住所の都道府県・市区町村・町名
-から該当する郵便番号を検索する。
+住所→郵便番号にはHeartRails Geo API、郵便番号→住所にはzipcloud API
+（いずれも無料・登録不要）を使う。
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ import re
 import requests
 
 API_URL = "https://geoapi.heartrails.com/api/json"
+ZIPCLOUD_API_URL = "https://zipcloud.ibsnet.co.jp/api/search"
 
 PREFECTURES = [
     "北海道", "青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県",
@@ -70,3 +71,25 @@ def lookup_postal_code(address: str) -> str | None:
     best = max(matched, key=lambda loc: len(loc["town"]))
     postal = best["postal"]
     return f"{postal[:3]}-{postal[3:]}"
+
+
+def lookup_address_from_postal_code(postal_code: str) -> str | None:
+    """郵便番号（ハイフンあり・なしどちらでも可）から住所（都道府県+市区町村+町域）を調べる。
+
+    見つからない場合、または郵便番号の形式が不正な場合はNoneを返す。
+    """
+    digits = re.sub(r"\D", "", postal_code)
+    if len(digits) != 7:
+        return None
+
+    response = requests.get(ZIPCLOUD_API_URL, params={"zipcode": digits}, timeout=10)
+    response.raise_for_status()
+    data = response.json()
+    if data.get("status") != 200:
+        return None
+    results = data.get("results")
+    if not results:
+        return None
+
+    best = results[0]
+    return f"{best['address1']}{best['address2']}{best['address3']}"

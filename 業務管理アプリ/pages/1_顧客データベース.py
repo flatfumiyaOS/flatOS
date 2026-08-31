@@ -1,10 +1,12 @@
-"""顧客データベース画面。顧客の登録・検索・編集・削除ができます。"""
+"""顧客データベース画面。顧客の登録・検索・編集・削除ができます。
+
+担当者は「顧客担当者」ページ（別ファイル）で顧客ごとに複数登録する。
+"""
 
 import pandas as pd
 import streamlit as st
 
 import auth_gate
-import contact_fields
 from chat import show_chat_panel, show_chat_toggle
 from db import (
     init_db,
@@ -15,73 +17,115 @@ from db import (
     search_customers,
 )
 from layout import APP_ICON_PATH, show_header
+from postal import lookup_address_from_postal_code
 
 st.set_page_config(page_title="顧客データベース", page_icon=str(APP_ICON_PATH), layout="wide")
 auth_gate.require_password()
 
 init_db()
 
+HONORIFIC_OPTIONS = ["様", "御中"]
+
+
+def _postal_lookup_pending_key(key_prefix: str) -> str:
+    return f"_{key_prefix}_postal_lookup_pending"
+
+
+def _apply_pending_postal_lookup(key_prefix: str) -> None:
+    """「郵便番号から住所を検索」ボタンで見つかった住所を、住所欄のウィジェットが
+    作られるより前にセットする（削除ボタンの詰め直しと同じ、ウィジェット生成前に
+    反映するパターン）。
+    """
+    found = st.session_state.pop(_postal_lookup_pending_key(key_prefix), None)
+    if found is not None:
+        st.session_state[f"{key_prefix}_address"] = found
+
+
+def _render_customer_fields(key_prefix: str, customer=None):
+    """顧客の入力欄一式を描画する。st.formは使わない（郵便番号検索ボタンを
+    フォーム内に置くと、他のボタン操作でも巻き込まれて値がクリアされてしまうため）。
+
+    戻り値: (name, kana, honorific, postal_code, address, phone, fax, email, referrer, memo)
+    """
+    col1, col2 = st.columns(2)
+    with col1:
+        name = st.text_input(
+            "顧客名 *", value=(customer["name"] if customer else ""), key=f"{key_prefix}_name"
+        )
+        kana = st.text_input(
+            "フリガナ", value=(customer["kana"] or "" if customer else ""), key=f"{key_prefix}_kana"
+        )
+        honorific_default = customer["honorific"] if customer else HONORIFIC_OPTIONS[0]
+        honorific_index = HONORIFIC_OPTIONS.index(honorific_default) if honorific_default in HONORIFIC_OPTIONS else 0
+        honorific = st.selectbox(
+            "敬称 * （個人なら「様」、法人なら「御中」）",
+            options=HONORIFIC_OPTIONS,
+            index=honorific_index,
+            key=f"{key_prefix}_honorific",
+        )
+        postal_code = st.text_input(
+            "郵便番号", value=(customer["postal_code"] or "" if customer else ""), key=f"{key_prefix}_postal"
+        )
+        if st.button("郵便番号から住所を検索", key=f"{key_prefix}_postal_search"):
+            found = lookup_address_from_postal_code(postal_code)
+            if found:
+                st.session_state[_postal_lookup_pending_key(key_prefix)] = found
+                st.rerun()
+            else:
+                st.warning("該当する住所が見つかりませんでした。郵便番号をご確認ください。")
+        address = st.text_input(
+            "住所", value=(customer["address"] or "" if customer else ""), key=f"{key_prefix}_address"
+        )
+    with col2:
+        phone = st.text_input(
+            "TEL", value=(customer["phone"] or "" if customer else ""), key=f"{key_prefix}_phone"
+        )
+        fax = st.text_input("FAX", value=(customer["fax"] or "" if customer else ""), key=f"{key_prefix}_fax")
+        email = st.text_input(
+            "MAIL", value=(customer["email"] or "" if customer else ""), key=f"{key_prefix}_email"
+        )
+        referrer = st.text_input(
+            "紹介者", value=(customer["referrer"] or "" if customer else ""), key=f"{key_prefix}_referrer"
+        )
+    memo = st.text_area("備考", value=(customer["memo"] or "" if customer else ""), key=f"{key_prefix}_memo")
+
+    return name, kana, honorific, postal_code, address, phone, fax, email, referrer, memo
+
+
+def _reset_add_customer_fields() -> None:
+    for suffix in ("name", "kana", "honorific", "postal", "address", "phone", "fax", "email", "referrer", "memo"):
+        st.session_state.pop(f"add_customer_{suffix}", None)
+
+
 show_header()
 st.title("顧客データベース")
 
 # --- 新規登録 ---
 if st.session_state.pop("_add_customer_reset", False):
-    st.session_state["add_customer_is_corporate"] = False
-    contact_fields.clear_fields("add_customer")
-contact_fields.apply_pending_removal("add_customer")
+    _reset_add_customer_fields()
+_apply_pending_postal_lookup("add_customer")
 
 with st.expander("新しい顧客を登録する", expanded=False):
-    add_is_corporate = st.checkbox("法人として登録する（チェックを外すと個人）", key="add_customer_is_corporate")
+    name, kana, honorific, postal_code, address, phone, fax, email, referrer, memo = _render_customer_fields(
+        "add_customer"
+    )
 
-    if add_is_corporate:
-        # ご担当者の追加・削除ボタンをその場で反映する必要があるため、st.formの外で描画する。
-        contact_fields.init_contact_count("add_customer", 1)
-        name, kana, phone, email, address, contacts, memo = contact_fields.render_corporate_fields(
-            "add_customer", name_label="会社名 *"
-        )
-
-        if st.button("登録する", key="add_customer_submit"):
-            if not name.strip():
-                st.error("会社名は必須です。")
-            else:
-                add_customer(
-                    name.strip(), kana.strip(), phone.strip(), email.strip(), address.strip(), memo.strip(),
-                    entity_type="法人",
-                    contacts=contact_fields.clean_contacts(contacts),
-                )
-                st.session_state["_add_customer_reset"] = True
-                st.success(f"「{name}」を登録しました。")
-                st.rerun()
-    else:
-        with st.form("add_customer_form", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            with col1:
-                name = st.text_input("氏名 *")
-                kana = st.text_input("フリガナ")
-                phone = st.text_input("電話番号")
-            with col2:
-                email = st.text_input("メールアドレス")
-                address = st.text_input("住所")
-            memo = st.text_area("備考")
-
-            submitted = st.form_submit_button("登録する")
-            if submitted:
-                if not name.strip():
-                    st.error("氏名は必須です。")
-                else:
-                    add_customer(
-                        name.strip(), kana.strip(), phone.strip(), email.strip(), address.strip(), memo.strip(),
-                        entity_type="個人",
-                        contacts=[],
-                    )
-                    st.session_state["_add_customer_reset"] = True
-                    st.success(f"「{name}」を登録しました。")
-                    st.rerun()
+    if st.button("登録する", key="add_customer_submit"):
+        if not name.strip():
+            st.error("顧客名は必須です。")
+        else:
+            add_customer(
+                name.strip(), kana.strip(), honorific, phone.strip(), fax.strip(),
+                email.strip(), postal_code.strip(), address.strip(), referrer.strip(), memo.strip(),
+            )
+            st.session_state["_add_customer_reset"] = True
+            st.success(f"「{name}」を登録しました。")
+            st.rerun()
 
 st.divider()
 
 # --- 検索 ---
-keyword = st.text_input("顧客を検索（氏名・フリガナ・電話番号・メール・住所）")
+keyword = st.text_input("顧客を検索（顧客名・フリガナ・電話番号・メール・住所など）")
 rows = search_customers(keyword) if keyword.strip() else get_all_customers()
 rows = sorted(rows, key=lambda r: r["kana"] or r["name"])
 
@@ -90,23 +134,20 @@ st.write(f"登録件数: {len(rows)} 件")
 if not rows:
     st.info("該当する顧客が見つかりません。")
 else:
-    df_rows = []
-    for r in rows:
-        is_corp = r["entity_type"] == "法人"
-        contacts = contact_fields.contacts_from_json(r["contacts_json"]) if is_corp else []
-        df_rows.append(
+    df = pd.DataFrame(
+        [
             {
-                "区分": "法人" if is_corp else "個人",
-                "氏名・会社名": r["name"],
+                "顧客名": r["name"],
                 "フリガナ": r["kana"],
-                "電話番号": r["phone"],
-                "メール": r["email"],
+                "敬称": r["honorific"],
+                "TEL": r["phone"],
+                "MAIL": r["email"],
                 "住所": r["address"],
-                "ご担当者": contact_fields.contact_names(contacts),
                 "更新日": r["updated_at"],
             }
-        )
-    df = pd.DataFrame(df_rows)
+            for r in rows
+        ]
+    )
     st.dataframe(df, width="stretch", hide_index=True)
 
     st.divider()
@@ -122,83 +163,31 @@ else:
     if selected_id is not None:
         customer = next(r for r in rows if r["id"] == selected_id)
         edit_key_prefix = f"edit_customer_{selected_id}"
-        contact_fields.apply_pending_removal(edit_key_prefix)
-        existing_contacts = contact_fields.contacts_from_json(customer["contacts_json"])
+        _apply_pending_postal_lookup(edit_key_prefix)
 
-        edit_is_corporate = st.checkbox(
-            "法人として登録する（チェックを外すと個人）",
-            value=customer["entity_type"] == "法人",
-            key=f"{edit_key_prefix}_is_corporate",
-        )
+        (
+            e_name, e_kana, e_honorific, e_postal_code, e_address,
+            e_phone, e_fax, e_email, e_referrer, e_memo,
+        ) = _render_customer_fields(edit_key_prefix, customer=customer)
 
-        if edit_is_corporate:
-            # ご担当者の追加・削除ボタンをその場で反映する必要があるため、st.formの外で描画する。
-            contact_fields.init_contact_count(edit_key_prefix, len(existing_contacts) or 1)
-            e_name, e_kana, e_phone, e_email, e_address, e_contacts, e_memo = contact_fields.render_corporate_fields(
-                edit_key_prefix,
-                name_label="会社名 *",
-                name_value=customer["name"],
-                kana_value=customer["kana"] or "",
-                phone_value=customer["phone"] or "",
-                email_value=customer["email"] or "",
-                address_value=customer["address"] or "",
-                memo_value=customer["memo"] or "",
-                contacts_value=existing_contacts,
-            )
+        col_save, col_delete = st.columns(2)
+        with col_save:
+            save = st.button("更新する", key=f"{edit_key_prefix}_save", width="stretch")
+        with col_delete:
+            delete = st.button("削除する", key=f"{edit_key_prefix}_delete", width="stretch")
 
-            col_save, col_delete = st.columns(2)
-            with col_save:
-                save = st.button("更新する", key=f"{edit_key_prefix}_save", width="stretch")
-            with col_delete:
-                delete = st.button("削除する", key=f"{edit_key_prefix}_delete", width="stretch")
-
-            if save:
-                if not e_name.strip():
-                    st.error("会社名は必須です。")
-                else:
-                    update_customer(
-                        selected_id, e_name.strip(), e_kana.strip(), e_phone.strip(),
-                        e_email.strip(), e_address.strip(), e_memo.strip(),
-                        entity_type="法人",
-                        contacts=contact_fields.clean_contacts(e_contacts),
-                    )
-                    st.success("更新しました。")
-                    st.rerun()
-            if delete:
-                st.session_state["pending_delete_id"] = selected_id
-        else:
-            with st.form("edit_customer_form"):
-                col1, col2 = st.columns(2)
-                with col1:
-                    e_name = st.text_input("氏名 *", value=customer["name"])
-                    e_kana = st.text_input("フリガナ", value=customer["kana"] or "")
-                    e_phone = st.text_input("電話番号", value=customer["phone"] or "")
-                with col2:
-                    e_email = st.text_input("メールアドレス", value=customer["email"] or "")
-                    e_address = st.text_input("住所", value=customer["address"] or "")
-                e_memo = st.text_area("備考", value=customer["memo"] or "")
-
-                col_save, col_delete = st.columns(2)
-                with col_save:
-                    save = st.form_submit_button("更新する", width="stretch")
-                with col_delete:
-                    delete = st.form_submit_button("削除する", width="stretch")
-
-                if save:
-                    if not e_name.strip():
-                        st.error("氏名は必須です。")
-                    else:
-                        update_customer(
-                            selected_id, e_name.strip(), e_kana.strip(), e_phone.strip(),
-                            e_email.strip(), e_address.strip(), e_memo.strip(),
-                            entity_type="個人",
-                            contacts=[],
-                        )
-                        st.success("更新しました。")
-                        st.rerun()
-
-                if delete:
-                    st.session_state["pending_delete_id"] = selected_id
+        if save:
+            if not e_name.strip():
+                st.error("顧客名は必須です。")
+            else:
+                update_customer(
+                    selected_id, e_name.strip(), e_kana.strip(), e_honorific, e_phone.strip(), e_fax.strip(),
+                    e_email.strip(), e_postal_code.strip(), e_address.strip(), e_referrer.strip(), e_memo.strip(),
+                )
+                st.success("更新しました。")
+                st.rerun()
+        if delete:
+            st.session_state["pending_delete_id"] = selected_id
 
     # 削除確認（誤操作防止のため、確認ボタンを別途表示）
     if st.session_state.get("pending_delete_id") == selected_id and selected_id is not None:

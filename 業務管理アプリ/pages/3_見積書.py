@@ -7,12 +7,11 @@ import re
 import streamlit as st
 
 import auth_gate
-import contact_fields
 import google_auth
 import project_store
 import sheets
 from chat import show_chat_panel, show_chat_toggle
-from db import get_all_customers
+from db import get_all_customers, get_customer_contacts_for_customer
 from layout import APP_ICON_PATH
 from postal import lookup_postal_code
 
@@ -35,22 +34,27 @@ def _format_customer_honorific(name: str) -> str:
 
 
 def _compute_honorific_fields(customer_row: dict) -> tuple[str, str]:
-    """顧客の区分に応じて、(A9・B4に入れる宛名, B3に入れる会社名) を返す。
+    """顧客の敬称・担当者登録状況に応じて、(A9・B4に入れる宛名, B3に入れる顧客名) を返す。
 
-    - 個人: 氏名+「様」（今まで通り）。B3は使わない。
-    - 法人でご担当者が未登録: 会社名+「御中」。B3は使わない。
-    - 法人でご担当者が登録済み: 最初のご担当者の氏名+「様」。B3に会社名を入れる。
+    - 顧客担当者が未登録: 顧客名+顧客自身の敬称（様/御中）。B3は使わない。
+    - 顧客担当者が登録済み: 最初の担当者の氏名+その担当者の敬称。B3に顧客名を入れる。
     """
     name = (customer_row.get("name") or "").strip()
-    entity_type = customer_row.get("entity_type") or "個人"
-    if entity_type != "法人":
-        return _format_customer_honorific(name), ""
+    honorific = customer_row.get("honorific") or "様"
+    customer_id = customer_row.get("id")
 
-    contacts = contact_fields.contacts_from_json(customer_row.get("contacts_json"))
-    first_contact_name = (contacts[0].get("name") or "").strip() if contacts else ""
-    if not first_contact_name:
-        return f"{name} 御中", ""
-    return _format_customer_honorific(first_contact_name), name
+    contacts = get_customer_contacts_for_customer(customer_id) if customer_id is not None else []
+    if not contacts:
+        if honorific == "様":
+            return _format_customer_honorific(name), ""
+        return f"{name} {honorific}", ""
+
+    first_contact = contacts[0]
+    contact_name = (first_contact["name"] or "").strip()
+    contact_honorific = first_contact["honorific"] or "様"
+    if contact_honorific == "様":
+        return _format_customer_honorific(contact_name), name
+    return f"{contact_name} {contact_honorific}", name
 
 
 def _find_previous_estimate_honorific(customer_name: str, exclude_project_id) -> dict | None:
@@ -107,7 +111,7 @@ def _fill_estimate_defaults(
         address = (customer_row.get("address") or "").strip()
         if address:
             sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "B2", address)
-            postal_code = lookup_postal_code(address)
+            postal_code = (customer_row.get("postal_code") or "").strip() or lookup_postal_code(address)
             if postal_code:
                 sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "B1", f"〒{postal_code}")
 
@@ -266,17 +270,18 @@ else:
                         )
                         project_name = linked_project_existing["name"]
                         linked_customer_name = linked_project_existing.get("customer_name")
-                        # 案件が持つ住所（現場住所）はそのまま使いつつ、法人/ご担当者の
+                        # 案件が持つ住所（現場住所）はそのまま使いつつ、敬称・担当者の
                         # 判定に必要な情報は顧客データベース側の一致するレコードから補う。
                         db_customer_row = next(
                             (c for c in customers if c["name"] == linked_customer_name), None
                         )
                         customer_row = (
                             {
+                                "id": db_customer_row["id"] if db_customer_row else None,
                                 "name": linked_customer_name,
                                 "address": linked_project_existing.get("address", ""),
-                                "entity_type": db_customer_row["entity_type"] if db_customer_row else "個人",
-                                "contacts_json": db_customer_row["contacts_json"] if db_customer_row else "[]",
+                                "postal_code": db_customer_row["postal_code"] if db_customer_row else "",
+                                "honorific": db_customer_row["honorific"] if db_customer_row else "様",
                             }
                             if linked_customer_name
                             else None

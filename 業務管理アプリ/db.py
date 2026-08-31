@@ -13,7 +13,7 @@ import google_auth
 DB_PATH = Path(__file__).parent / "data" / "customers.db"
 DB_DRIVE_FILENAME = "customers.db"
 
-_TABLES_FOR_EMPTY_CHECK = ("customers", "documents", "memory_notes", "vendors")
+_TABLES_FOR_EMPTY_CHECK = ("customers", "documents", "memory_notes", "vendors", "customer_contacts")
 
 
 def _restore_db_from_drive_if_empty() -> None:
@@ -122,6 +122,24 @@ def init_db() -> None:
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS customer_contacts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            customer_id INTEGER,
+            customer_name TEXT NOT NULL,
+            name TEXT NOT NULL,
+            kana TEXT,
+            honorific TEXT NOT NULL DEFAULT '様',
+            title TEXT,
+            email TEXT,
+            memo TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (customer_id) REFERENCES customers (id)
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS vendors (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -135,42 +153,50 @@ def init_db() -> None:
         )
         """
     )
-    # 法人/個人の区分と、法人の場合の複数担当者（氏名・電話番号・メールのセット）を
-    # 既存テーブルに追加。既存データはすべて「個人」扱いのまま今まで通り使える。
+    # 協力会社側はまだ「法人/個人」＋複数担当者(JSON)の仕組みを使っているため、
+    # entity_type/contacts_json列自体はvendors用に残す。顧客側はcontact_fields.py
+    # 経由のこの仕組みを使わなくなったが、既存データを壊さないよう列は削除しない。
     _ensure_column(conn, "customers", "entity_type", "entity_type TEXT NOT NULL DEFAULT '個人'")
     _ensure_column(conn, "customers", "contacts_json", "contacts_json TEXT NOT NULL DEFAULT '[]'")
     _ensure_column(conn, "vendors", "entity_type", "entity_type TEXT NOT NULL DEFAULT '個人'")
     _ensure_column(conn, "vendors", "contacts_json", "contacts_json TEXT NOT NULL DEFAULT '[]'")
+    # 顧客データベースの敬称・郵便番号・FAX・紹介者欄。既存データは敬称=「様」扱いで
+    # そのまま使える（これまで登録されていたのはすべて個人のため）。
+    _ensure_column(conn, "customers", "honorific", "honorific TEXT NOT NULL DEFAULT '様'")
+    _ensure_column(conn, "customers", "postal_code", "postal_code TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "customers", "fax", "fax TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "customers", "referrer", "referrer TEXT NOT NULL DEFAULT ''")
     conn.commit()
     conn.close()
 
 
-def add_customer(name, kana, phone, email, address, memo, entity_type="個人", contacts=None) -> None:
+def add_customer(name, kana, honorific, phone, fax, email, postal_code, address, referrer, memo) -> None:
     now = datetime.now().isoformat(timespec="seconds")
     conn = get_connection()
     conn.execute(
         """
-        INSERT INTO customers (name, kana, phone, email, address, memo, entity_type, contacts_json, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO customers
+            (name, kana, honorific, phone, fax, email, postal_code, address, referrer, memo, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (name, kana, phone, email, address, memo, entity_type, json.dumps(contacts or [], ensure_ascii=False), now, now),
+        (name, kana, honorific, phone, fax, email, postal_code, address, referrer, memo, now, now),
     )
     conn.commit()
     conn.close()
     _backup_db_to_drive()
 
 
-def update_customer(customer_id, name, kana, phone, email, address, memo, entity_type="個人", contacts=None) -> None:
+def update_customer(customer_id, name, kana, honorific, phone, fax, email, postal_code, address, referrer, memo) -> None:
     now = datetime.now().isoformat(timespec="seconds")
     conn = get_connection()
     conn.execute(
         """
         UPDATE customers
-        SET name = ?, kana = ?, phone = ?, email = ?, address = ?, memo = ?,
-            entity_type = ?, contacts_json = ?, updated_at = ?
+        SET name = ?, kana = ?, honorific = ?, phone = ?, fax = ?, email = ?,
+            postal_code = ?, address = ?, referrer = ?, memo = ?, updated_at = ?
         WHERE id = ?
         """,
-        (name, kana, phone, email, address, memo, entity_type, json.dumps(contacts or [], ensure_ascii=False), now, customer_id),
+        (name, kana, honorific, phone, fax, email, postal_code, address, referrer, memo, now, customer_id),
     )
     conn.commit()
     conn.close()
@@ -205,10 +231,84 @@ def search_customers(keyword: str):
     rows = conn.execute(
         """
         SELECT * FROM customers
-        WHERE name LIKE ? OR kana LIKE ? OR phone LIKE ? OR email LIKE ? OR address LIKE ? OR contacts_json LIKE ?
+        WHERE name LIKE ? OR kana LIKE ? OR phone LIKE ? OR fax LIKE ? OR email LIKE ?
+           OR postal_code LIKE ? OR address LIKE ? OR referrer LIKE ?
         ORDER BY id DESC
         """,
-        (like, like, like, like, like, like),
+        (like, like, like, like, like, like, like, like),
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+def add_customer_contact(customer_id, customer_name, name, kana, honorific, title, email, memo) -> None:
+    now = datetime.now().isoformat(timespec="seconds")
+    conn = get_connection()
+    conn.execute(
+        """
+        INSERT INTO customer_contacts
+            (customer_id, customer_name, name, kana, honorific, title, email, memo, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (customer_id, customer_name, name, kana, honorific, title, email, memo, now, now),
+    )
+    conn.commit()
+    conn.close()
+    _backup_db_to_drive()
+
+
+def update_customer_contact(contact_id, customer_id, customer_name, name, kana, honorific, title, email, memo) -> None:
+    now = datetime.now().isoformat(timespec="seconds")
+    conn = get_connection()
+    conn.execute(
+        """
+        UPDATE customer_contacts
+        SET customer_id = ?, customer_name = ?, name = ?, kana = ?, honorific = ?,
+            title = ?, email = ?, memo = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (customer_id, customer_name, name, kana, honorific, title, email, memo, now, contact_id),
+    )
+    conn.commit()
+    conn.close()
+    _backup_db_to_drive()
+
+
+def delete_customer_contact(contact_id) -> None:
+    conn = get_connection()
+    conn.execute("DELETE FROM customer_contacts WHERE id = ?", (contact_id,))
+    conn.commit()
+    conn.close()
+    _backup_db_to_drive()
+
+
+def get_all_customer_contacts():
+    conn = get_connection()
+    rows = conn.execute("SELECT * FROM customer_contacts ORDER BY id DESC").fetchall()
+    conn.close()
+    return rows
+
+
+def get_customer_contacts_for_customer(customer_id):
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM customer_contacts WHERE customer_id = ? ORDER BY id ASC",
+        (customer_id,),
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+def search_customer_contacts(keyword: str):
+    conn = get_connection()
+    like = f"%{keyword}%"
+    rows = conn.execute(
+        """
+        SELECT * FROM customer_contacts
+        WHERE name LIKE ? OR kana LIKE ? OR title LIKE ? OR email LIKE ? OR customer_name LIKE ?
+        ORDER BY id DESC
+        """,
+        (like, like, like, like, like),
     ).fetchall()
     conn.close()
     return rows
