@@ -142,13 +142,14 @@ def _finance_trend_chart(rows: list[dict], period_field: str) -> alt.Chart:
     return chart
 
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
     [
         "📄 原価入力（請求書・レシート AI-OCR）",
         "📊 現場別 粗利管理",
         "🧾 顧客請求・領収書発行",
         "💳 支払管理（協力会社別）",
         "📈 収支ダッシュボード",
+        "🗂 案件分類・集計",
     ]
 )
 
@@ -794,3 +795,74 @@ with tab5:
         st.dataframe(yearly_rows, width="stretch", hide_index=True)
     else:
         st.caption("データがまだありません。")
+
+with tab6:
+    st.subheader("案件分類・集計")
+    st.caption(
+        "自社支社・自社担当者・受注ステータス・案件分類1〜3を組み合わせて絞り込み、"
+        "該当する案件の売上集計・一覧を確認できます（例: 案件分類2＝元請 かつ 案件分類3＝内装仕上げ工事）。"
+        "何も選択しなければ、その項目では絞り込みません。"
+    )
+
+    col_filter1, col_filter2 = st.columns(2)
+    with col_filter1:
+        filter_office = st.multiselect("自社支社", options=project_store.OFFICE_OPTIONS, key="agg_filter_office")
+        filter_staff = st.multiselect("自社担当者", options=project_store.STAFF_OPTIONS, key="agg_filter_staff")
+        filter_order_status = st.multiselect(
+            "受注ステータス", options=project_store.ORDER_STATUS_OPTIONS, key="agg_filter_order_status"
+        )
+    with col_filter2:
+        filter_category1 = st.multiselect("案件分類1", options=project_store.CATEGORY1_OPTIONS, key="agg_filter_cat1")
+        filter_category2 = st.multiselect("案件分類2", options=project_store.CATEGORY2_OPTIONS, key="agg_filter_cat2")
+        filter_category3 = st.multiselect("案件分類3", options=project_store.CATEGORY3_OPTIONS, key="agg_filter_cat3")
+
+    def _matches_filters(p: dict) -> bool:
+        if filter_office and p.get("office") not in filter_office:
+            return False
+        if filter_staff and p.get("staff") not in filter_staff:
+            return False
+        if filter_order_status and p.get("order_status") not in filter_order_status:
+            return False
+        if filter_category1 and p.get("category1") not in filter_category1:
+            return False
+        if filter_category2 and p.get("category2") not in filter_category2:
+            return False
+        if filter_category3 and p.get("category3") not in filter_category3:
+            return False
+        return True
+
+    matched_projects = [p for p in projects if _matches_filters(p)]
+    recognized_projects = [p for p in matched_projects if project_store.is_revenue_recognized(p)]
+    recognized_revenue = sum(_project_revenue(p) for p in recognized_projects)
+    matched_revenue_all = sum(_project_revenue(p) for p in matched_projects)
+
+    col_a, col_b, col_c = st.columns(3)
+    col_a.metric("該当案件数", f"{len(matched_projects)} 件")
+    col_b.metric("社内売上計上額（受注済×請求済のみ）", f"¥{recognized_revenue:,}")
+    col_c.metric("参考: 該当案件の売上合計（計上有無を問わない）", f"¥{matched_revenue_all:,}")
+    st.caption(
+        "「社内売上計上額」は、受注ステータス＝受注済 かつ 請求ステータス＝請求済 の案件のみを"
+        "合計したものです（案件管理ページと同じ判定基準）。"
+    )
+
+    st.markdown("#### 該当案件一覧")
+    if not matched_projects:
+        st.caption("条件に一致する案件がありません。")
+    else:
+        rows = [
+            {
+                "案件名": p["name"],
+                "顧客名": p.get("customer_name") or "未設定",
+                "自社支社": p.get("office") or "未設定",
+                "自社担当者": p.get("staff") or "未設定",
+                "案件分類1": p.get("category1") or "未設定",
+                "案件分類2": p.get("category2") or "未設定",
+                "案件分類3": p.get("category3") or "未設定",
+                "受注ステータス": p.get("order_status") or "未設定",
+                "請求ステータス": p.get("billing_status") or "未設定",
+                "売上": _yen(_project_revenue(p)),
+                "社内売上計上": "○" if project_store.is_revenue_recognized(p) else "－",
+            }
+            for p in sorted(matched_projects, key=lambda p: p.get("updated_at", ""), reverse=True)
+        ]
+        st.dataframe(rows, width="stretch", hide_index=True)
