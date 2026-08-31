@@ -22,6 +22,26 @@ DATA_DIR = Path(__file__).parent / "data"
 PROJECTS_FILE = DATA_DIR / "projects.json"
 PROJECT_FILES_DIR = DATA_DIR / "project_files"
 
+OFFICE_OPTIONS = ["長野オフィス", "東京オフィス"]
+STAFF_OPTIONS = ["平居靖弘", "平居史也"]
+PAYMENT_TERMS_OPTIONS = ["工事完了後10日以内", "ご契約時50%工事完了後50%", "月末締翌月末", "その他"]
+ORDER_STATUS_OPTIONS = ["見積中", "受注確定", "受注済"]
+BILLING_TIMING_OPTIONS = ["一括請求", "定期請求"]
+CATEGORY1_OPTIONS = ["営繕", "リフォーム", "リノベーション", "店舗新装工事", "その他"]
+CATEGORY2_OPTIONS = ["元請", "下請"]
+CATEGORY3_OPTIONS = ["内装仕上げ工事", "その他建築工事", "その他"]
+BILLING_STATUS_UNBILLED = "未請求"
+BILLING_STATUS_BILLED = "請求済"
+BILLING_STATUS_OPTIONS = [BILLING_STATUS_UNBILLED, BILLING_STATUS_BILLED]
+
+
+def is_revenue_recognized(project: dict) -> bool:
+    """受注ステータス＝受注済 かつ 請求ステータス＝請求済のとき、社内的に売上として扱う。
+
+    freee/boardのような外部会計ソフトとの連携は行わず、アプリ内の判定のみで完結させる。
+    """
+    return project.get("order_status") == "受注済" and project.get("billing_status") == BILLING_STATUS_BILLED
+
 
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
@@ -62,6 +82,20 @@ def create_project(name: str) -> dict:
         "start_date": "",
         "end_date": "",
         "overview": "",
+        # 案件管理の新規登録フォームを経由せずに作成される場合（見積書ページからの
+        # 簡易新規作成など）もあるため、支社は空文字列（未設定）をデフォルトにする。
+        # "長野オフィス"をデフォルトにすると、案件管理を経由していない案件の見積書まで
+        # 誤って長野の住所で上書きしてしまうため。
+        "office": "",
+        "staff": "",
+        "payment_terms": "",
+        "order_status": ORDER_STATUS_OPTIONS[0],
+        "billing_timing": "",
+        "billing_due_date": "",
+        "category1": "",
+        "category2": "",
+        "category3": "",
+        "billing_status": BILLING_STATUS_UNBILLED,
         "documents": [],
         "photos": [],
         "cover_photo": None,
@@ -176,6 +210,34 @@ def update_basic_info(
         start_date=start_date,
         end_date=end_date,
         overview=overview,
+    )
+
+
+def update_case_details(
+    project_id: int,
+    office: str,
+    staff: str,
+    payment_terms: str,
+    order_status: str,
+    billing_timing: str,
+    billing_due_date: str,
+    category1: str,
+    category2: str,
+    category3: str,
+    billing_status: str,
+) -> None:
+    _update_project(
+        project_id,
+        office=office,
+        staff=staff,
+        payment_terms=payment_terms,
+        order_status=order_status,
+        billing_timing=billing_timing,
+        billing_due_date=billing_due_date,
+        category1=category1,
+        category2=category2,
+        category3=category3,
+        billing_status=billing_status,
     )
 
 

@@ -41,6 +41,10 @@ def _parse_date(value: str) -> datetime.date | None:
         return None
 
 
+def _option_index(value: str, options: list[str]) -> int:
+    return options.index(value) if value in options else 0
+
+
 def _extract_spreadsheet_id(text: str) -> str:
     """Google スプレッドシートのURLが貼り付けられた場合はIDを取り出す。すでにIDのみの場合はそのまま返す。"""
     match = re.search(r"/d/([a-zA-Z0-9-_]+)", text)
@@ -113,6 +117,14 @@ def _render_project_card(p: dict, status: str) -> None:
     period = html.escape(_format_date_range(p))
     status_label = html.escape(status)
 
+    unbilled_badge = ""
+    if p.get("order_status") == "受注済" and p.get("billing_status") != project_store.BILLING_STATUS_BILLED:
+        unbilled_badge = (
+            '<span style="display:inline-block; background:#dc2626; color:#ffffff; font-size:12px; '
+            'font-weight:600; padding:3px 10px; border-radius:999px; margin-bottom:10px; margin-left:6px;">'
+            "請求ステータス: 未請求</span>"
+        )
+
     st.markdown(
         f"""
         <div style="{bg_style} border-radius: 12px 12px 0 0; box-shadow: 0 4px 14px rgba(0,0,0,0.25);
@@ -121,7 +133,7 @@ def _render_project_card(p: dict, status: str) -> None:
             <div>
                 <span style="display:inline-block; background:{badge_color}; color:#ffffff;
                              font-size:12px; font-weight:600; padding:3px 10px; border-radius:999px;
-                             margin-bottom:10px;">{status_label}</span>
+                             margin-bottom:10px;">{status_label}</span>{unbilled_badge}
                 <div style="color:#ffffff; font-weight:700; font-size:17px; line-height:1.4;
                             text-shadow: 0 1px 3px rgba(0,0,0,0.6);">{name}</div>
             </div>
@@ -190,6 +202,10 @@ if view_mode == "list":
         if status_filter is None:
             status_filter = STATUS_FILTER_ACTIVE
 
+        unbilled_only = st.checkbox(
+            "受注済・未請求のみ表示（請求漏れの確認用）", value=False, key="unbilled_only_filter"
+        )
+
         today = datetime.date.today()
         if status_filter == "すべて":
             filtered_projects = visible_projects
@@ -197,6 +213,12 @@ if view_mode == "list":
             filtered_projects = [p for p in visible_projects if _project_status(p, today) == "施工中"]
         else:
             filtered_projects = [p for p in visible_projects if _project_status(p, today) == status_filter]
+
+        if unbilled_only:
+            filtered_projects = [
+                p for p in filtered_projects
+                if p.get("order_status") == "受注済" and p.get("billing_status") != project_store.BILLING_STATUS_BILLED
+            ]
 
         if not filtered_projects:
             st.caption("該当する案件がありません。")
@@ -252,6 +274,35 @@ elif view_mode == "create":
         cover_photo_file = st.file_uploader(
             "現場建物写真（案件一覧カードの表紙に使います）", type=["jpg", "jpeg", "png"]
         )
+
+        st.markdown("##### 自社情報")
+        col_office, col_staff = st.columns(2)
+        with col_office:
+            office = st.selectbox("自社支社", options=project_store.OFFICE_OPTIONS)
+        with col_staff:
+            staff = st.selectbox("自社担当者", options=project_store.STAFF_OPTIONS)
+
+        st.markdown("##### ステータス・分類")
+        col_order, col_billing_timing, col_billing_status = st.columns(3)
+        with col_order:
+            order_status = st.selectbox("受注ステータス", options=project_store.ORDER_STATUS_OPTIONS)
+        with col_billing_timing:
+            billing_timing = st.selectbox("請求タイミング", options=project_store.BILLING_TIMING_OPTIONS)
+        with col_billing_status:
+            billing_status = st.selectbox("請求ステータス", options=project_store.BILLING_STATUS_OPTIONS)
+        col_payment_terms, col_billing_due_date = st.columns(2)
+        with col_payment_terms:
+            payment_terms = st.selectbox("支払条件", options=project_store.PAYMENT_TERMS_OPTIONS)
+        with col_billing_due_date:
+            billing_due_date_value = st.date_input("請求（予定）日", value=datetime.date.today())
+        col_cat1, col_cat2, col_cat3 = st.columns(3)
+        with col_cat1:
+            category1 = st.selectbox("案件分類1", options=project_store.CATEGORY1_OPTIONS)
+        with col_cat2:
+            category2 = st.selectbox("案件分類2", options=project_store.CATEGORY2_OPTIONS)
+        with col_cat3:
+            category3 = st.selectbox("案件分類3", options=project_store.CATEGORY3_OPTIONS)
+
         submitted = st.form_submit_button("保存", type="primary")
         if submitted:
             if not new_name.strip():
@@ -268,6 +319,11 @@ elif view_mode == "create":
                     start_date_value.isoformat(),
                     end_date_value.isoformat(),
                     overview,
+                )
+                project_store.update_case_details(
+                    new_project["id"], office, staff, payment_terms, order_status,
+                    billing_timing, billing_due_date_value.isoformat(),
+                    category1, category2, category3, billing_status,
                 )
                 if cover_photo_file is not None:
                     project_store.set_cover_photo(
@@ -353,6 +409,77 @@ elif view_mode == "detail":
                     project_store.set_cover_photo(
                         selected_id, cover_photo_file.name, cover_photo_file.getvalue()
                     )
+                st.success("保存しました。")
+                st.rerun()
+
+        st.divider()
+
+        with st.form("case_details_form"):
+            st.markdown("##### 自社情報")
+            col_office, col_staff = st.columns(2)
+            with col_office:
+                office = st.selectbox(
+                    "自社支社", options=project_store.OFFICE_OPTIONS,
+                    index=_option_index(project.get("office", ""), project_store.OFFICE_OPTIONS),
+                )
+            with col_staff:
+                staff = st.selectbox(
+                    "自社担当者", options=project_store.STAFF_OPTIONS,
+                    index=_option_index(project.get("staff", ""), project_store.STAFF_OPTIONS),
+                )
+
+            st.markdown("##### ステータス・分類")
+            col_order, col_billing_timing, col_billing_status = st.columns(3)
+            with col_order:
+                order_status = st.selectbox(
+                    "受注ステータス", options=project_store.ORDER_STATUS_OPTIONS,
+                    index=_option_index(project.get("order_status", ""), project_store.ORDER_STATUS_OPTIONS),
+                )
+            with col_billing_timing:
+                billing_timing = st.selectbox(
+                    "請求タイミング", options=project_store.BILLING_TIMING_OPTIONS,
+                    index=_option_index(project.get("billing_timing", ""), project_store.BILLING_TIMING_OPTIONS),
+                )
+            with col_billing_status:
+                billing_status = st.selectbox(
+                    "請求ステータス", options=project_store.BILLING_STATUS_OPTIONS,
+                    index=_option_index(project.get("billing_status", ""), project_store.BILLING_STATUS_OPTIONS),
+                )
+            col_payment_terms, col_billing_due_date = st.columns(2)
+            with col_payment_terms:
+                payment_terms = st.selectbox(
+                    "支払条件", options=project_store.PAYMENT_TERMS_OPTIONS,
+                    index=_option_index(project.get("payment_terms", ""), project_store.PAYMENT_TERMS_OPTIONS),
+                )
+            with col_billing_due_date:
+                billing_due_date_value = st.date_input(
+                    "請求（予定）日",
+                    value=_parse_date(project.get("billing_due_date", "")) or datetime.date.today(),
+                )
+            col_cat1, col_cat2, col_cat3 = st.columns(3)
+            with col_cat1:
+                category1 = st.selectbox(
+                    "案件分類1", options=project_store.CATEGORY1_OPTIONS,
+                    index=_option_index(project.get("category1", ""), project_store.CATEGORY1_OPTIONS),
+                )
+            with col_cat2:
+                category2 = st.selectbox(
+                    "案件分類2", options=project_store.CATEGORY2_OPTIONS,
+                    index=_option_index(project.get("category2", ""), project_store.CATEGORY2_OPTIONS),
+                )
+            with col_cat3:
+                category3 = st.selectbox(
+                    "案件分類3", options=project_store.CATEGORY3_OPTIONS,
+                    index=_option_index(project.get("category3", ""), project_store.CATEGORY3_OPTIONS),
+                )
+
+            case_details_saved = st.form_submit_button("保存")
+            if case_details_saved:
+                project_store.update_case_details(
+                    selected_id, office, staff, payment_terms, order_status,
+                    billing_timing, billing_due_date_value.isoformat(),
+                    category1, category2, category3, billing_status,
+                )
                 st.success("保存しました。")
                 st.rerun()
 

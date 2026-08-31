@@ -20,6 +20,13 @@ ESTIMATE_SUMMARY_SHEET = "御見積書"
 ESTIMATE_ITEM_START_ROW = 32
 ESTIMATE_ITEM_ROW_HEIGHT_PX = 28
 
+# 案件の自社支社（project_store.OFFICE_OPTIONS）に応じて、御見積書シートの発行元
+# 郵便番号・住所（D22:D24）を差し替える。東京オフィス・未設定（""）のときは
+# テンプレートの現在値（東京オフィスの住所）のままにする。
+OFFICE_ADDRESS_OVERRIDES = {
+    "長野オフィス": {"D22": "〒389-0207", "D23": "長野県北佐久郡御代田町", "D24": "大字馬瀬口1597-486"},
+}
+
 
 def _format_customer_honorific(name: str) -> str:
     """氏名を、テンプレートの例（「石田　なつえ 様」）と同じ形式にする。
@@ -87,9 +94,14 @@ def _find_previous_estimate_honorific(customer_name: str, exclude_project_id) ->
 
 
 def _fill_estimate_defaults(
-    spreadsheet_id: str, customer_row, project_name: str, exclude_project_id=None
+    spreadsheet_id: str, customer_row, project_name: str, exclude_project_id=None, office: str = ""
 ) -> None:
     """新規作成した見積書に、顧客名・住所・郵便番号・案件名をあらかじめ入力しておく。"""
+    overrides = OFFICE_ADDRESS_OVERRIDES.get(office)
+    if overrides:
+        for cell, value in overrides.items():
+            sheets.write_cell(spreadsheet_id, ESTIMATE_SUMMARY_SHEET, cell, value)
+
     if customer_row is not None:
         customer_row = dict(customer_row)
         name = (customer_row.get("name") or "").strip()
@@ -298,7 +310,8 @@ else:
                         project_name, google_auth.get_credentials()
                     )
                     _fill_estimate_defaults(
-                        new_id, customer_row, project_name, exclude_project_id=linked_project["id"]
+                        new_id, customer_row, project_name,
+                        exclude_project_id=linked_project["id"], office=linked_project.get("office", ""),
                     )
                     _clear_old_example_rows(new_id)
 
