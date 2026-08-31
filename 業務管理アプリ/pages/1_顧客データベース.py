@@ -93,8 +93,15 @@ def _render_customer_fields(key_prefix: str, customer=None):
 
 
 def _reset_add_customer_fields() -> None:
-    for suffix in ("name", "kana", "honorific", "postal", "address", "phone", "fax", "email", "referrer", "memo"):
-        st.session_state.pop(f"add_customer_{suffix}", None)
+    """新規登録欄の入力値を、次回の登録に備えて空にする。
+
+    session_stateのキーをpop（削除）するだけだと、ブラウザ側の表示がリセットされずに
+    前回入力した文字列が残ってしまう（Streamlitの既知の挙動）。既定値を明示的に
+    書き込むことで、ウィジェットの表示も確実にクリアされる。
+    """
+    for suffix in ("name", "kana", "postal", "address", "phone", "fax", "email", "referrer", "memo"):
+        st.session_state[f"add_customer_{suffix}"] = ""
+    st.session_state["add_customer_honorific"] = HONORIFIC_OPTIONS[0]
 
 
 show_header()

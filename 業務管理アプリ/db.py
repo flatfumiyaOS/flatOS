@@ -166,6 +166,15 @@ def init_db() -> None:
     _ensure_column(conn, "customers", "postal_code", "postal_code TEXT NOT NULL DEFAULT ''")
     _ensure_column(conn, "customers", "fax", "fax TEXT NOT NULL DEFAULT ''")
     _ensure_column(conn, "customers", "referrer", "referrer TEXT NOT NULL DEFAULT ''")
+    # 協力会社データベースの敬称・郵便番号・FAX・紹介者・評価欄。
+    _ensure_column(conn, "vendors", "honorific", "honorific TEXT NOT NULL DEFAULT '様'")
+    _ensure_column(conn, "vendors", "postal_code", "postal_code TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "vendors", "fax", "fax TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "vendors", "referrer", "referrer TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "vendors", "quality_rating", "quality_rating TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "vendors", "service_rating", "service_rating TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "vendors", "communication_rating", "communication_rating TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "vendors", "it_literacy_rating", "it_literacy_rating TEXT NOT NULL DEFAULT ''")
     conn.commit()
     conn.close()
 
@@ -373,32 +382,55 @@ def get_memory_notes(category: str):
     return rows
 
 
-def add_vendor(name, kana, phone, email, address, memo, entity_type="個人", contacts=None) -> None:
+def add_vendor(
+    name, kana, phone, email, address, memo,
+    honorific="様", fax="", postal_code="", referrer="",
+    quality_rating="", service_rating="", communication_rating="", it_literacy_rating="",
+    contacts=None,
+) -> None:
     now = datetime.now().isoformat(timespec="seconds")
     conn = get_connection()
     conn.execute(
         """
-        INSERT INTO vendors (name, kana, phone, email, address, memo, entity_type, contacts_json, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO vendors
+            (name, kana, phone, email, address, memo, honorific, fax, postal_code, referrer,
+             quality_rating, service_rating, communication_rating, it_literacy_rating,
+             contacts_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (name, kana, phone, email, address, memo, entity_type, json.dumps(contacts or [], ensure_ascii=False), now, now),
+        (
+            name, kana, phone, email, address, memo, honorific, fax, postal_code, referrer,
+            quality_rating, service_rating, communication_rating, it_literacy_rating,
+            json.dumps(contacts or [], ensure_ascii=False), now, now,
+        ),
     )
     conn.commit()
     conn.close()
     _backup_db_to_drive()
 
 
-def update_vendor(vendor_id, name, kana, phone, email, address, memo, entity_type="個人", contacts=None) -> None:
+def update_vendor(
+    vendor_id, name, kana, phone, email, address, memo,
+    honorific="様", fax="", postal_code="", referrer="",
+    quality_rating="", service_rating="", communication_rating="", it_literacy_rating="",
+    contacts=None,
+) -> None:
     now = datetime.now().isoformat(timespec="seconds")
     conn = get_connection()
     conn.execute(
         """
         UPDATE vendors
         SET name = ?, kana = ?, phone = ?, email = ?, address = ?, memo = ?,
-            entity_type = ?, contacts_json = ?, updated_at = ?
+            honorific = ?, fax = ?, postal_code = ?, referrer = ?,
+            quality_rating = ?, service_rating = ?, communication_rating = ?, it_literacy_rating = ?,
+            contacts_json = ?, updated_at = ?
         WHERE id = ?
         """,
-        (name, kana, phone, email, address, memo, entity_type, json.dumps(contacts or [], ensure_ascii=False), now, vendor_id),
+        (
+            name, kana, phone, email, address, memo, honorific, fax, postal_code, referrer,
+            quality_rating, service_rating, communication_rating, it_literacy_rating,
+            json.dumps(contacts or [], ensure_ascii=False), now, vendor_id,
+        ),
     )
     conn.commit()
     conn.close()
@@ -433,10 +465,11 @@ def search_vendors(keyword: str):
     rows = conn.execute(
         """
         SELECT * FROM vendors
-        WHERE name LIKE ? OR kana LIKE ? OR phone LIKE ? OR email LIKE ? OR address LIKE ? OR contacts_json LIKE ?
+        WHERE name LIKE ? OR kana LIKE ? OR phone LIKE ? OR fax LIKE ? OR email LIKE ?
+           OR postal_code LIKE ? OR address LIKE ? OR referrer LIKE ? OR contacts_json LIKE ?
         ORDER BY id DESC
         """,
-        (like, like, like, like, like, like),
+        (like, like, like, like, like, like, like, like, like),
     ).fetchall()
     conn.close()
     return rows
