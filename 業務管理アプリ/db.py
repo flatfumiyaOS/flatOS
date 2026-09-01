@@ -179,33 +179,38 @@ def init_db() -> None:
     conn.close()
 
 
-def add_customer(name, kana, honorific, phone, fax, email, postal_code, address, referrer, memo) -> None:
+def add_customer(
+    name, kana, honorific, phone, fax, email, postal_code, address, referrer, memo, entity_type="個人"
+) -> None:
     now = datetime.now().isoformat(timespec="seconds")
     conn = get_connection()
     conn.execute(
         """
         INSERT INTO customers
-            (name, kana, honorific, phone, fax, email, postal_code, address, referrer, memo, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (name, kana, honorific, phone, fax, email, postal_code, address, referrer, memo, entity_type, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (name, kana, honorific, phone, fax, email, postal_code, address, referrer, memo, now, now),
+        (name, kana, honorific, phone, fax, email, postal_code, address, referrer, memo, entity_type, now, now),
     )
     conn.commit()
     conn.close()
     _backup_db_to_drive()
 
 
-def update_customer(customer_id, name, kana, honorific, phone, fax, email, postal_code, address, referrer, memo) -> None:
+def update_customer(
+    customer_id, name, kana, honorific, phone, fax, email, postal_code, address, referrer, memo,
+    entity_type="個人",
+) -> None:
     now = datetime.now().isoformat(timespec="seconds")
     conn = get_connection()
     conn.execute(
         """
         UPDATE customers
         SET name = ?, kana = ?, honorific = ?, phone = ?, fax = ?, email = ?,
-            postal_code = ?, address = ?, referrer = ?, memo = ?, updated_at = ?
+            postal_code = ?, address = ?, referrer = ?, memo = ?, entity_type = ?, updated_at = ?
         WHERE id = ?
         """,
-        (name, kana, honorific, phone, fax, email, postal_code, address, referrer, memo, now, customer_id),
+        (name, kana, honorific, phone, fax, email, postal_code, address, referrer, memo, entity_type, now, customer_id),
     )
     conn.commit()
     conn.close()

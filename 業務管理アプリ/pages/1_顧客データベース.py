@@ -25,6 +25,7 @@ auth_gate.require_password()
 init_db()
 
 HONORIFIC_OPTIONS = ["様", "御中"]
+ENTITY_TYPE_OPTIONS = ["個人", "法人"]
 
 
 def _postal_lookup_pending_key(key_prefix: str) -> str:
@@ -45,7 +46,7 @@ def _render_customer_fields(key_prefix: str, customer=None):
     """顧客の入力欄一式を描画する。st.formは使わない（郵便番号検索ボタンを
     フォーム内に置くと、他のボタン操作でも巻き込まれて値がクリアされてしまうため）。
 
-    戻り値: (name, kana, honorific, postal_code, address, phone, fax, email, referrer, memo)
+    戻り値: (name, kana, entity_type, honorific, postal_code, address, phone, fax, email, referrer, memo)
     """
     col1, col2 = st.columns(2)
     with col1:
@@ -54,6 +55,16 @@ def _render_customer_fields(key_prefix: str, customer=None):
         )
         kana = st.text_input(
             "フリガナ", value=(customer["kana"] or "" if customer else ""), key=f"{key_prefix}_kana"
+        )
+        entity_type_default = customer["entity_type"] if customer else ENTITY_TYPE_OPTIONS[0]
+        entity_type_index = (
+            ENTITY_TYPE_OPTIONS.index(entity_type_default) if entity_type_default in ENTITY_TYPE_OPTIONS else 0
+        )
+        entity_type = st.selectbox(
+            "個人 / 法人 *",
+            options=ENTITY_TYPE_OPTIONS,
+            index=entity_type_index,
+            key=f"{key_prefix}_entity_type",
         )
         honorific_default = customer["honorific"] if customer else HONORIFIC_OPTIONS[0]
         honorific_index = HONORIFIC_OPTIONS.index(honorific_default) if honorific_default in HONORIFIC_OPTIONS else 0
@@ -89,7 +100,7 @@ def _render_customer_fields(key_prefix: str, customer=None):
         )
     memo = st.text_area("備考", value=(customer["memo"] or "" if customer else ""), key=f"{key_prefix}_memo")
 
-    return name, kana, honorific, postal_code, address, phone, fax, email, referrer, memo
+    return name, kana, entity_type, honorific, postal_code, address, phone, fax, email, referrer, memo
 
 
 def _reset_add_customer_fields() -> None:
@@ -101,6 +112,7 @@ def _reset_add_customer_fields() -> None:
     """
     for suffix in ("name", "kana", "postal", "address", "phone", "fax", "email", "referrer", "memo"):
         st.session_state[f"add_customer_{suffix}"] = ""
+    st.session_state["add_customer_entity_type"] = ENTITY_TYPE_OPTIONS[0]
     st.session_state["add_customer_honorific"] = HONORIFIC_OPTIONS[0]
 
 
@@ -113,9 +125,9 @@ if st.session_state.pop("_add_customer_reset", False):
 _apply_pending_postal_lookup("add_customer")
 
 with st.expander("新しい顧客を登録する", expanded=False):
-    name, kana, honorific, postal_code, address, phone, fax, email, referrer, memo = _render_customer_fields(
-        "add_customer"
-    )
+    (
+        name, kana, entity_type, honorific, postal_code, address, phone, fax, email, referrer, memo,
+    ) = _render_customer_fields("add_customer")
 
     if st.button("登録する", key="add_customer_submit"):
         if not name.strip():
@@ -124,6 +136,7 @@ with st.expander("新しい顧客を登録する", expanded=False):
             add_customer(
                 name.strip(), kana.strip(), honorific, phone.strip(), fax.strip(),
                 email.strip(), postal_code.strip(), address.strip(), referrer.strip(), memo.strip(),
+                entity_type=entity_type,
             )
             st.session_state["_add_customer_reset"] = True
             st.success(f"「{name}」を登録しました。")
@@ -146,6 +159,7 @@ else:
             {
                 "顧客名": r["name"],
                 "フリガナ": r["kana"],
+                "区分": r["entity_type"],
                 "敬称": r["honorific"],
                 "TEL": r["phone"],
                 "MAIL": r["email"],
@@ -173,7 +187,7 @@ else:
         _apply_pending_postal_lookup(edit_key_prefix)
 
         (
-            e_name, e_kana, e_honorific, e_postal_code, e_address,
+            e_name, e_kana, e_entity_type, e_honorific, e_postal_code, e_address,
             e_phone, e_fax, e_email, e_referrer, e_memo,
         ) = _render_customer_fields(edit_key_prefix, customer=customer)
 
@@ -190,6 +204,7 @@ else:
                 update_customer(
                     selected_id, e_name.strip(), e_kana.strip(), e_honorific, e_phone.strip(), e_fax.strip(),
                     e_email.strip(), e_postal_code.strip(), e_address.strip(), e_referrer.strip(), e_memo.strip(),
+                    entity_type=e_entity_type,
                 )
                 st.success("更新しました。")
                 st.rerun()
