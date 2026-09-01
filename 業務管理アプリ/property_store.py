@@ -27,6 +27,8 @@ PROPERTY_TYPE_OPTIONS = ["マンション", "戸建", "オフィス", "店舗", 
 ADDRESS_TYPE_SAME_AS_CUSTOMER = "顧客情報の住所と同じ"
 ADDRESS_TYPE_NEW = "新しい住所を入力"
 ADDRESS_TYPE_OPTIONS = [ADDRESS_TYPE_SAME_AS_CUSTOMER, ADDRESS_TYPE_NEW]
+OFFICE_OPTIONS = ["長野オフィス", "東京オフィス"]
+STAFF_OPTIONS = ["平居靖弘", "平居史也"]
 
 
 def _now() -> str:
@@ -62,7 +64,7 @@ def get_properties_for_customer(customer_id: int) -> list[dict]:
 
 def add_property(
     customer_id: int, customer_name: str, name: str, kana: str,
-    property_type: str, address_type: str, address: str, memo: str,
+    property_type: str, address_type: str, address: str, office: str, staff: str, memo: str,
 ) -> dict:
     properties = _load_all()
     new_id = max((p["id"] for p in properties), default=0) + 1
@@ -76,6 +78,8 @@ def add_property(
         "property_type": property_type,
         "address_type": address_type,
         "address": address,
+        "office": office,
+        "staff": staff,
         "memo": memo,
         "image": None,
         "created_at": now,
@@ -88,7 +92,7 @@ def add_property(
 
 def update_property(
     property_id: int, customer_id: int, customer_name: str, name: str, kana: str,
-    property_type: str, address_type: str, address: str, memo: str,
+    property_type: str, address_type: str, address: str, office: str, staff: str, memo: str,
 ) -> None:
     properties = _load_all()
     for p in properties:
@@ -101,6 +105,8 @@ def update_property(
                 property_type=property_type,
                 address_type=address_type,
                 address=address,
+                office=office,
+                staff=staff,
                 memo=memo,
                 updated_at=_now(),
             )
