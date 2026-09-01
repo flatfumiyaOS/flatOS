@@ -96,6 +96,11 @@ def create_project(name: str) -> dict:
         "category2": "",
         "category3": "",
         "billing_status": BILLING_STATUS_UNBILLED,
+        # 見積書ページで「物件」から新規に案件を作成した場合、どの物件から
+        # 作られたかを覚えておく（物件は工事が終わっても現場として残り続け、
+        # 同じ物件に対して複数の案件が作られることがあるため）。
+        "property_id": None,
+        "property_name": "",
         "documents": [],
         "photos": [],
         "cover_photo": None,
@@ -108,6 +113,11 @@ def create_project(name: str) -> dict:
     projects.append(project)
     _save_all(projects)
     return project
+
+
+def set_property_link(project_id: int, property_id: int, property_name: str) -> None:
+    """この案件がどの物件から作られたかを記録する（見積書ページの「物件から作成」用）。"""
+    _update_project(project_id, property_id=property_id, property_name=property_name)
 
 
 def archive_project(project_id: int) -> None:

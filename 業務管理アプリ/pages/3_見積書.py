@@ -9,9 +9,10 @@ import streamlit as st
 import auth_gate
 import google_auth
 import project_store
+import property_store
 import sheets
 from chat import show_chat_panel, show_chat_toggle
-from db import get_all_customers, get_customer_contacts_for_customer
+from db import get_all_customers, get_customer, get_customer_contacts_for_customer, init_db
 from layout import APP_ICON_PATH
 from postal import lookup_postal_code
 
@@ -199,6 +200,8 @@ def _clear_old_example_rows(spreadsheet_id: str) -> None:
 st.set_page_config(page_title="見積書", page_icon=str(APP_ICON_PATH), layout="wide")
 auth_gate.require_password()
 
+init_db()
+
 google_auth.handle_login_redirect()
 
 st.markdown(
@@ -233,79 +236,153 @@ if not google_auth.is_logged_in():
     st.link_button("Googleでログイン", google_auth.get_login_url())
     st.caption("新しい案件の見積書を作成するには、Googleアカウントでログインしてください。")
 else:
-    NEW_PROJECT_CHOICE = "（新規に案件を作成）"
-    existing_projects = [p for p in project_store.get_all_projects() if not p.get("archived")]
-    project_choice_options = [NEW_PROJECT_CHOICE] + [p["name"] for p in existing_projects]
-    project_choice = st.selectbox(
-        "案件を選択", options=project_choice_options, key="estimate_project_choice"
+    source_mode = st.radio(
+        "見積書のもとになる情報",
+        options=["案件", "物件"],
+        horizontal=True,
+        key="estimate_source_mode",
+    )
+    st.caption(
+        "「案件」: 1つの案件で1件の大きな改修工事を行う場合。"
+        "「物件」: 同じ現場に対して、随時・部分的な工事が何度も発生する場合"
+        "（物件を選び、その都度の工事内容を案件名として入力します）。"
     )
 
     customers = get_all_customers()
+    create_clicked = False
+    project_choice = None
     new_project_name = ""
-    if project_choice == NEW_PROJECT_CHOICE:
-        customer_names = ["（選択してください）"] + [c["name"] for c in customers]
-        st.selectbox("顧客を選択", options=customer_names, key="selected_customer_name")
+    properties = []
+    property_id = None
+    property_project_name = ""
 
-        col_name, col_button = st.columns([3, 1])
-        with col_name:
-            new_project_name = st.text_input(
-                "新規案件名",
-                key="new_project_name",
-                label_visibility="collapsed",
-                placeholder="新規案件名（例: 〇〇邸 改修工事）",
-            )
-        with col_button:
+    if source_mode == "案件":
+        NEW_PROJECT_CHOICE = "（新規に案件を作成）"
+        existing_projects = [p for p in project_store.get_all_projects() if not p.get("archived")]
+        project_choice_options = [NEW_PROJECT_CHOICE] + [p["name"] for p in existing_projects]
+        project_choice = st.selectbox(
+            "案件を選択", options=project_choice_options, key="estimate_project_choice"
+        )
+
+        if project_choice == NEW_PROJECT_CHOICE:
+            customer_names = ["（選択してください）"] + [c["name"] for c in customers]
+            st.selectbox("顧客を選択", options=customer_names, key="selected_customer_name")
+
+            col_name, col_button = st.columns([3, 1])
+            with col_name:
+                new_project_name = st.text_input(
+                    "新規案件名",
+                    key="new_project_name",
+                    label_visibility="collapsed",
+                    placeholder="新規案件名（例: 〇〇邸 改修工事）",
+                )
+            with col_button:
+                create_clicked = st.button(
+                    "新規見積作成", key="create_estimate_button", width="stretch"
+                )
+        else:
+            st.caption(f"「{project_choice}」の見積書を新規作成します。")
             create_clicked = st.button(
                 "新規見積作成", key="create_estimate_button", width="stretch"
             )
     else:
-        st.caption(f"「{project_choice}」の見積書を新規作成します。")
-        create_clicked = st.button(
-            "新規見積作成", key="create_estimate_button", width="stretch"
-        )
+        properties = property_store.get_all_properties()
+        if not properties:
+            st.info("先に「物件」ページで物件を登録してください。")
+        else:
+            property_id = st.selectbox(
+                "物件を選択",
+                options=[p["id"] for p in properties],
+                format_func=lambda x: next(
+                    f"{p['customer_name']} / {p['name']}" for p in properties if p["id"] == x
+                ),
+                key="estimate_property_choice",
+            )
+            col_name, col_button = st.columns([3, 1])
+            with col_name:
+                property_project_name = st.text_input(
+                    "案件名（今回の工事内容を入力）",
+                    key="estimate_property_project_name",
+                    label_visibility="collapsed",
+                    placeholder="案件名（例: 3階トイレ改修工事）",
+                )
+            with col_button:
+                create_clicked = st.button(
+                    "新規見積作成", key="create_estimate_button_property", width="stretch"
+                )
 
     if create_clicked:
-        if project_choice == NEW_PROJECT_CHOICE and not new_project_name.strip():
+        if source_mode == "案件" and project_choice == "（新規に案件を作成）" and not new_project_name.strip():
+            st.error("案件名を入力してください。")
+        elif source_mode == "物件" and not property_project_name.strip():
             st.error("案件名を入力してください。")
         else:
             with st.spinner("スプレッドシートを作成しています..."):
                 try:
-                    if project_choice == NEW_PROJECT_CHOICE:
-                        project_name = new_project_name.strip()
-                        selected_name = st.session_state.get("selected_customer_name")
-                        customer_row = next(
-                            (c for c in customers if c["name"] == selected_name), None
-                        )
+                    if source_mode == "案件":
+                        if project_choice == "（新規に案件を作成）":
+                            project_name = new_project_name.strip()
+                            selected_name = st.session_state.get("selected_customer_name")
+                            customer_row = next(
+                                (c for c in customers if c["name"] == selected_name), None
+                            )
+                        else:
+                            linked_project_existing = next(
+                                p for p in existing_projects if p["name"] == project_choice
+                            )
+                            project_name = linked_project_existing["name"]
+                            linked_customer_name = linked_project_existing.get("customer_name")
+                            # 案件が持つ住所（現場住所）はそのまま使いつつ、敬称・担当者の
+                            # 判定に必要な情報は顧客データベース側の一致するレコードから補う。
+                            db_customer_row = next(
+                                (c for c in customers if c["name"] == linked_customer_name), None
+                            )
+                            customer_row = (
+                                {
+                                    "id": db_customer_row["id"] if db_customer_row else None,
+                                    "name": linked_customer_name,
+                                    "address": linked_project_existing.get("address", ""),
+                                    "postal_code": db_customer_row["postal_code"] if db_customer_row else "",
+                                    "honorific": db_customer_row["honorific"] if db_customer_row else "様",
+                                }
+                                if linked_customer_name
+                                else None
+                            )
+
+                        # 案件管理にも案件として登録し、見積書スプレッドシートを紐付ける
+                        # （案件を選択していればその案件に、新規作成であれば同じ名前の
+                        # 既存案件があればそこに、無ければ新規作成して紐付ける）。
+                        linked_project = project_store.get_or_create_project(project_name)
                     else:
-                        linked_project_existing = next(
-                            p for p in existing_projects if p["name"] == project_choice
+                        selected_property = next(p for p in properties if p["id"] == property_id)
+                        project_name = property_project_name.strip()
+                        db_customer_row = get_customer(selected_property["customer_id"])
+                        if selected_property["address_type"] == property_store.ADDRESS_TYPE_SAME_AS_CUSTOMER:
+                            effective_address = (db_customer_row["address"] or "") if db_customer_row else ""
+                        else:
+                            effective_address = selected_property["address"] or ""
+                        customer_row = dict(db_customer_row) if db_customer_row else None
+                        if customer_row is not None:
+                            customer_row["address"] = effective_address
+
+                        # 物件は工事完了後も現場として残り続けるため、同じ物件に対して
+                        # 案件名を変えながら何度も見積書を作ることを想定する。案件名が
+                        # 既存の案件と一致すればそこに、無ければ新規作成して紐付ける。
+                        linked_project = project_store.get_or_create_project(project_name)
+                        project_store.update_basic_info(
+                            linked_project["id"],
+                            selected_property["customer_name"],
+                            effective_address,
+                            linked_project.get("start_date", ""),
+                            linked_project.get("end_date", ""),
+                            linked_project.get("overview", ""),
                         )
-                        project_name = linked_project_existing["name"]
-                        linked_customer_name = linked_project_existing.get("customer_name")
-                        # 案件が持つ住所（現場住所）はそのまま使いつつ、敬称・担当者の
-                        # 判定に必要な情報は顧客データベース側の一致するレコードから補う。
-                        db_customer_row = next(
-                            (c for c in customers if c["name"] == linked_customer_name), None
-                        )
-                        customer_row = (
-                            {
-                                "id": db_customer_row["id"] if db_customer_row else None,
-                                "name": linked_customer_name,
-                                "address": linked_project_existing.get("address", ""),
-                                "postal_code": db_customer_row["postal_code"] if db_customer_row else "",
-                                "honorific": db_customer_row["honorific"] if db_customer_row else "様",
-                            }
-                            if linked_customer_name
-                            else None
+                        project_store.set_property_link(
+                            linked_project["id"], selected_property["id"], selected_property["name"]
                         )
 
-                    # 案件管理にも案件として登録し、見積書スプレッドシートを紐付ける
-                    # （案件を選択していればその案件に、新規作成であれば同じ名前の
-                    # 既存案件があればそこに、無ければ新規作成して紐付ける）。
                     # 過去の見積書検索で自分自身をヒットさせないよう、スプレッドシート
                     # 作成前に案件IDを確定させておく。
-                    linked_project = project_store.get_or_create_project(project_name)
-
                     new_id = sheets.create_estimate_spreadsheet(
                         project_name, google_auth.get_credentials()
                     )

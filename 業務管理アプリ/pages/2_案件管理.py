@@ -347,7 +347,10 @@ elif view_mode == "detail":
         st.rerun()
 
     st.title(f"📁 {project['name']}")
-    st.caption(f"顧客名: {project.get('customer_name') or '未設定'}")
+    caption_text = f"顧客名: {project.get('customer_name') or '未設定'}"
+    if project.get("property_name"):
+        caption_text += f"　／　物件: {project['property_name']}"
+    st.caption(caption_text)
     if project.get("archived"):
         st.warning("この案件は非表示に設定されています（案件一覧・会計画面には表示されません）。")
 
