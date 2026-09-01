@@ -288,7 +288,7 @@ else:
     else:
         properties = property_store.get_all_properties()
         if not properties:
-            st.info("先に「物件」ページで物件を登録してください。")
+            st.info("先に「物件管理」ページで物件を登録してください。")
         else:
             property_id = st.selectbox(
                 "物件を選択",

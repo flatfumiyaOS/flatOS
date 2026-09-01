@@ -12,13 +12,13 @@ from chat import show_chat_panel, show_chat_toggle
 from db import get_all_customers, get_customer, init_db
 from layout import APP_ICON_PATH, show_header
 
-st.set_page_config(page_title="物件", page_icon=str(APP_ICON_PATH), layout="wide")
+st.set_page_config(page_title="物件管理", page_icon=str(APP_ICON_PATH), layout="wide")
 auth_gate.require_password()
 
 init_db()
 
 show_header()
-st.title("物件")
+st.title("物件管理")
 st.caption("顧客データベースに登録済みの顧客に紐づけて、物件を複数登録できます。")
 
 customers = get_all_customers()
