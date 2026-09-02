@@ -78,6 +78,13 @@ else:
         st.session_state["selected_schedule_id"] = st.session_state.pop(
             "_pending_select_schedule_id"
         )
+    # 削除などで選択中の工程表が一覧から無くなった場合、そのままだとselectboxの
+    # 選択肢に存在しない値がsession_stateに残り、エラーになる。ウィジェット生成前に外す。
+    if (
+        "selected_schedule_id" in st.session_state
+        and st.session_state["selected_schedule_id"] not in schedule_options
+    ):
+        del st.session_state["selected_schedule_id"]
 
     col_select, col_new = st.columns([3, 1])
     with col_select:
@@ -215,7 +222,7 @@ else:
 
     if selected_schedule_id is not None:
         schedule = schedule_store.get_schedule(selected_schedule_id)
-        col_caption, col_open = st.columns([4, 1])
+        col_caption, col_open, col_delete = st.columns([3, 1, 1])
         with col_caption:
             st.caption(
                 f"表示中: {schedule['file_name']}"
@@ -227,11 +234,35 @@ else:
                 sheets.spreadsheet_url(schedule["spreadsheet_id"]),
                 width="stretch",
             )
-        st.markdown(
-            f'<iframe class="gsheet-embed" '
-            f'src="{sheets.spreadsheet_url(schedule["spreadsheet_id"])}"></iframe>',
-            unsafe_allow_html=True,
-        )
+        with col_delete:
+            if st.button("削除する", key="delete_schedule_button", width="stretch"):
+                st.session_state["pending_delete_schedule_id"] = selected_schedule_id
+
+        # 削除確認（誤操作防止のため、確認ボタンを別途表示）
+        if st.session_state.get("pending_delete_schedule_id") == selected_schedule_id:
+            st.warning(
+                f"「{schedule['file_name']}」を本当に削除しますか？"
+                "一覧から外れ、Googleドライブ上のファイルもゴミ箱に移動します"
+                "（ゴミ箱からの復元は可能です）。"
+            )
+            col_yes, col_no = st.columns(2)
+            with col_yes:
+                if st.button("はい、削除する", type="primary", key="confirm_delete_schedule_button", width="stretch"):
+                    credentials = google_auth.get_credentials() if google_auth.is_logged_in() else None
+                    schedule_store.remove_schedule(selected_schedule_id, credentials)
+                    del st.session_state["pending_delete_schedule_id"]
+                    st.success("削除しました。")
+                    st.rerun()
+            with col_no:
+                if st.button("キャンセル", key="cancel_delete_schedule_button", width="stretch"):
+                    del st.session_state["pending_delete_schedule_id"]
+                    st.rerun()
+        else:
+            st.markdown(
+                f'<iframe class="gsheet-embed" '
+                f'src="{sheets.spreadsheet_url(schedule["spreadsheet_id"])}"></iframe>',
+                unsafe_allow_html=True,
+            )
 
 # チャットのトグル・パネルは、ページ固有のウィジェット（工程表選択など）をすべて
 # 生成し終えたあとに呼び出す。先に呼び出すと、チャットの開閉ボタンが押されたときの

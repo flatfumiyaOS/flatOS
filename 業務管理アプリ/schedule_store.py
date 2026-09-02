@@ -57,7 +57,21 @@ def add_schedule(
     return record
 
 
-def remove_schedule(schedule_id: int) -> None:
-    """一覧からこの工程表の記録だけを外す。Googleスプレッドシートの実体は削除しない。"""
-    schedules = [s for s in _load_all() if s["id"] != schedule_id]
-    _save_all(schedules)
+def remove_schedule(schedule_id: int, user_credentials=None) -> None:
+    """一覧からこの工程表の記録を外す。
+
+    user_credentials（ログイン中のGoogleアカウント）が渡されていれば、Googleドライブ上の
+    スプレッドシート本体もゴミ箱に移動する（完全削除ではなく復元可能な状態にする）。
+    渡されていない場合、Googleドライブ上のファイルはそのまま残る（一覧からの記録だけを外す）。
+    """
+    schedules = _load_all()
+    schedule = next((s for s in schedules if s["id"] == schedule_id), None)
+    if schedule is None:
+        return
+    if user_credentials is not None:
+        try:
+            drive_storage.trash_file(user_credentials, schedule["spreadsheet_id"])
+        except Exception:
+            pass
+    remaining = [s for s in schedules if s["id"] != schedule_id]
+    _save_all(remaining)
