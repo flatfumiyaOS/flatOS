@@ -114,6 +114,21 @@ def update_property(
     _save_all(properties)
 
 
+def update_property_fields(property_id: int, **fields) -> None:
+    """物件の指定したフィールドだけを更新する（部分更新）。
+
+    アプリのチャットから「この項目だけ直したい」という操作を行うために使う
+    （フォーム経由の更新は既存のupdate_propertyを使う）。
+    """
+    properties = _load_all()
+    for p in properties:
+        if p["id"] == property_id:
+            p.update(fields)
+            p["updated_at"] = _now()
+            break
+    _save_all(properties)
+
+
 def _trash_image_file(record: dict, user_credentials) -> None:
     path = Path(record.get("path", ""))
     if path.exists():

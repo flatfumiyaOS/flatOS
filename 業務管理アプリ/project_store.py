@@ -205,6 +205,15 @@ def _update_project(project_id: int, **fields) -> None:
     _save_all(projects)
 
 
+def update_project_fields(project_id: int, **fields) -> None:
+    """案件の指定したフィールドだけを更新する（部分更新）。
+
+    アプリのチャットから「この項目だけ直したい」という操作を行うために使う
+    （フォーム経由の更新は既存のupdate_basic_info/update_case_detailsを使う）。
+    """
+    _update_project(project_id, **fields)
+
+
 def update_basic_info(
     project_id: int,
     customer_name: str,

@@ -9,8 +9,26 @@ import os
 import streamlit as st
 import streamlit.components.v1 as components
 
+import project_store
+import property_store
 import schedule_store
-from db import add_memory_note, get_all_customers, get_all_documents, get_memory_notes
+from db import (
+    add_customer,
+    add_customer_contact,
+    add_memory_note,
+    add_vendor,
+    get_all_customer_contacts,
+    get_all_customers,
+    get_all_documents,
+    get_all_vendors,
+    search_customer_contacts,
+    search_customers,
+    search_vendors,
+    update_customer_contact_fields,
+    update_customer_fields,
+    update_vendor_fields,
+    get_memory_notes,
+)
 from sheets import (
     TEMPLATE_SPREADSHEET_ID,
     delete_rows,
@@ -200,6 +218,407 @@ SHEET_TOOLS = [
         },
     },
 ]
+
+# アプリ本体のデータベース（顧客・顧客担当者・協力会社・案件・物件）を操作するための
+# ツール定義。スプレッドシート操作とは別に、いつでも使えるようにする
+# （見積書作成中に顧客の郵便番号を直すなど、ページをまたいだ依頼が多いため）。
+# 「削除」はどの対象についても用意しない（CLAUDE.mdの方針上、データの削除は
+# ユーザー本人の明示的な許可が必要なため。削除が必要な場合は該当ページの
+# 削除確認つきUIを使うよう案内する）。
+
+CUSTOMER_UPDATABLE_FIELDS = [
+    "name", "kana", "entity_type", "honorific", "phone", "fax", "email",
+    "postal_code", "address", "referrer", "memo",
+]
+CUSTOMER_FIELD_OPTIONS = {"entity_type": ["個人", "法人"], "honorific": ["様", "御中"]}
+
+CONTACT_UPDATABLE_FIELDS = ["name", "kana", "honorific", "title", "email", "memo"]
+CONTACT_FIELD_OPTIONS = {"honorific": ["様", "御中"]}
+
+VENDOR_UPDATABLE_FIELDS = [
+    "name", "kana", "phone", "email", "address", "memo", "honorific", "fax",
+    "postal_code", "referrer", "quality_rating", "service_rating",
+    "communication_rating", "it_literacy_rating",
+]
+VENDOR_FIELD_OPTIONS = {"honorific": ["様", "御中"]}
+
+PROJECT_UPDATABLE_FIELDS = [
+    "name", "customer_name", "address", "start_date", "end_date", "overview",
+    "office", "staff", "payment_terms", "order_status", "billing_timing",
+    "billing_due_date", "category1", "category2", "category3", "billing_status",
+]
+PROJECT_FIELD_OPTIONS = {
+    "office": project_store.OFFICE_OPTIONS,
+    "staff": project_store.STAFF_OPTIONS,
+    "payment_terms": project_store.PAYMENT_TERMS_OPTIONS,
+    "order_status": project_store.ORDER_STATUS_OPTIONS,
+    "billing_timing": project_store.BILLING_TIMING_OPTIONS,
+    "category1": project_store.CATEGORY1_OPTIONS,
+    "category2": project_store.CATEGORY2_OPTIONS,
+    "category3": project_store.CATEGORY3_OPTIONS,
+    "billing_status": project_store.BILLING_STATUS_OPTIONS,
+}
+
+PROPERTY_UPDATABLE_FIELDS = ["name", "kana", "property_type", "address_type", "address", "office", "staff", "memo"]
+PROPERTY_FIELD_OPTIONS = {
+    "property_type": property_store.PROPERTY_TYPE_OPTIONS,
+    "address_type": property_store.ADDRESS_TYPE_OPTIONS,
+    "office": property_store.OFFICE_OPTIONS,
+    "staff": property_store.STAFF_OPTIONS,
+}
+
+APP_DB_TOOLS = [
+    {
+        "name": "search_customers_db",
+        "description": "顧客データベースを、顧客名・フリガナ・電話番号・メール・住所などのキーワードで検索する。キーワードを空文字にすると全件を返す。更新の前には必ずこれで対象のidを確認する。",
+        "input_schema": {
+            "type": "object",
+            "properties": {"keyword": {"type": "string", "description": "検索キーワード（空文字なら全件）"}},
+            "required": ["keyword"],
+        },
+    },
+    {
+        "name": "update_customer_field",
+        "description": "顧客データベースの、指定した1件の顧客の1項目だけを更新する。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "customer_id": {"type": "integer", "description": "更新する顧客のid（search_customers_dbで確認する）"},
+                "field": {"type": "string", "enum": CUSTOMER_UPDATABLE_FIELDS, "description": "更新する項目名"},
+                "value": {"type": "string", "description": "新しい値"},
+            },
+            "required": ["customer_id", "field", "value"],
+        },
+    },
+    {
+        "name": "add_customer_db",
+        "description": "顧客データベースに新しい顧客を登録する。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "顧客名（必須）"},
+                "kana": {"type": "string", "description": "フリガナ"},
+                "entity_type": {"type": "string", "enum": ["個人", "法人"], "description": "個人か法人か（既定: 個人）"},
+                "honorific": {"type": "string", "enum": ["様", "御中"], "description": "敬称（既定: 様）"},
+                "phone": {"type": "string", "description": "TEL"},
+                "fax": {"type": "string", "description": "FAX"},
+                "email": {"type": "string", "description": "MAIL"},
+                "postal_code": {"type": "string", "description": "郵便番号"},
+                "address": {"type": "string", "description": "住所"},
+                "referrer": {"type": "string", "description": "紹介者"},
+                "memo": {"type": "string", "description": "備考"},
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "search_customer_contacts_db",
+        "description": "顧客担当者データベースを、担当者名・フリガナ・役職・メール・顧客名などのキーワードで検索する。キーワードを空文字にすると全件を返す。",
+        "input_schema": {
+            "type": "object",
+            "properties": {"keyword": {"type": "string", "description": "検索キーワード（空文字なら全件）"}},
+            "required": ["keyword"],
+        },
+    },
+    {
+        "name": "update_customer_contact_field",
+        "description": "顧客担当者データベースの、指定した1件の担当者の1項目だけを更新する。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "contact_id": {"type": "integer", "description": "更新する担当者のid（search_customer_contacts_dbで確認する）"},
+                "field": {"type": "string", "enum": CONTACT_UPDATABLE_FIELDS, "description": "更新する項目名"},
+                "value": {"type": "string", "description": "新しい値"},
+            },
+            "required": ["contact_id", "field", "value"],
+        },
+    },
+    {
+        "name": "add_customer_contact_db",
+        "description": "既存の顧客に、新しい顧客担当者を1名登録する。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "customer_name": {"type": "string", "description": "紐付け先の顧客名（search_customers_dbで確認した正式名称）"},
+                "name": {"type": "string", "description": "担当者名（必須）"},
+                "kana": {"type": "string", "description": "フリガナ"},
+                "honorific": {"type": "string", "enum": ["様", "御中"], "description": "敬称（既定: 様）"},
+                "title": {"type": "string", "description": "役職"},
+                "email": {"type": "string", "description": "MAIL"},
+                "memo": {"type": "string", "description": "備考"},
+            },
+            "required": ["customer_name", "name"],
+        },
+    },
+    {
+        "name": "search_vendors_db",
+        "description": "協力会社データベースを、会社名・フリガナ・電話番号・メール・住所などのキーワードで検索する。キーワードを空文字にすると全件を返す。",
+        "input_schema": {
+            "type": "object",
+            "properties": {"keyword": {"type": "string", "description": "検索キーワード（空文字なら全件）"}},
+            "required": ["keyword"],
+        },
+    },
+    {
+        "name": "update_vendor_field",
+        "description": "協力会社データベースの、指定した1件の協力会社の1項目だけを更新する（ご担当者欄は対象外。ご担当者の変更は協力会社ページから行うよう案内する）。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "vendor_id": {"type": "integer", "description": "更新する協力会社のid（search_vendors_dbで確認する）"},
+                "field": {"type": "string", "enum": VENDOR_UPDATABLE_FIELDS, "description": "更新する項目名"},
+                "value": {"type": "string", "description": "新しい値"},
+            },
+            "required": ["vendor_id", "field", "value"],
+        },
+    },
+    {
+        "name": "add_vendor_db",
+        "description": "協力会社データベースに新しい協力会社を登録する（ご担当者欄は登録できないので、必要なら協力会社ページから追加するよう案内する）。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "会社名（必須）"},
+                "kana": {"type": "string", "description": "フリガナ"},
+                "honorific": {"type": "string", "enum": ["様", "御中"], "description": "敬称（既定: 様）"},
+                "phone": {"type": "string", "description": "TEL"},
+                "fax": {"type": "string", "description": "FAX"},
+                "email": {"type": "string", "description": "MAIL"},
+                "postal_code": {"type": "string", "description": "郵便番号"},
+                "address": {"type": "string", "description": "住所"},
+                "referrer": {"type": "string", "description": "紹介者"},
+                "memo": {"type": "string", "description": "備考"},
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "search_projects_db",
+        "description": "案件管理データベースを、案件名・顧客名に含まれるキーワードで検索する（非表示にした案件は対象外）。キーワードを空文字にすると全件を返す。",
+        "input_schema": {
+            "type": "object",
+            "properties": {"keyword": {"type": "string", "description": "検索キーワード（空文字なら全件）"}},
+            "required": ["keyword"],
+        },
+    },
+    {
+        "name": "update_project_field",
+        "description": "案件管理データベースの、指定した1件の案件の1項目だけを更新する。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "project_id": {"type": "integer", "description": "更新する案件のid（search_projects_dbで確認する）"},
+                "field": {"type": "string", "enum": PROJECT_UPDATABLE_FIELDS, "description": "更新する項目名"},
+                "value": {"type": "string", "description": "新しい値"},
+            },
+            "required": ["project_id", "field", "value"],
+        },
+    },
+    {
+        "name": "add_project_db",
+        "description": "案件管理データベースに、案件名だけを指定して新しい案件を登録する。他の項目（顧客名・自社支社・ステータスなど）は登録後にupdate_project_fieldで設定する。",
+        "input_schema": {
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "案件名（必須）"}},
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "search_properties_db",
+        "description": "物件管理データベースを、物件名・顧客名・住所に含まれるキーワードで検索する。キーワードを空文字にすると全件を返す。",
+        "input_schema": {
+            "type": "object",
+            "properties": {"keyword": {"type": "string", "description": "検索キーワード（空文字なら全件）"}},
+            "required": ["keyword"],
+        },
+    },
+    {
+        "name": "update_property_field",
+        "description": "物件管理データベースの、指定した1件の物件の1項目だけを更新する（紐づく顧客・外観画像は対象外。変更が必要な場合は物件管理ページから行うよう案内する）。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "property_id": {"type": "integer", "description": "更新する物件のid（search_properties_dbで確認する）"},
+                "field": {"type": "string", "enum": PROPERTY_UPDATABLE_FIELDS, "description": "更新する項目名"},
+                "value": {"type": "string", "description": "新しい値"},
+            },
+            "required": ["property_id", "field", "value"],
+        },
+    },
+    {
+        "name": "add_property_db",
+        "description": "既存の顧客に紐づく新しい物件を登録する（外観画像は登録できないので、必要なら物件管理ページから追加するよう案内する）。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "customer_name": {"type": "string", "description": "紐付け先の顧客名（search_customers_dbで確認した正式名称）"},
+                "name": {"type": "string", "description": "物件名（必須）"},
+                "kana": {"type": "string", "description": "フリガナ"},
+                "property_type": {
+                    "type": "string",
+                    "enum": property_store.PROPERTY_TYPE_OPTIONS,
+                    "description": f"物件種別（既定: {property_store.PROPERTY_TYPE_OPTIONS[0]}）",
+                },
+                "address_type": {
+                    "type": "string",
+                    "enum": property_store.ADDRESS_TYPE_OPTIONS,
+                    "description": f"物件住所種別（既定: {property_store.ADDRESS_TYPE_SAME_AS_CUSTOMER}）",
+                },
+                "address": {"type": "string", "description": "物件住所（「新しい住所を入力」を選んだ場合のみ使用される）"},
+                "office": {"type": "string", "enum": property_store.OFFICE_OPTIONS, "description": "自社支社"},
+                "staff": {"type": "string", "enum": property_store.STAFF_OPTIONS, "description": "自社担当者"},
+                "memo": {"type": "string", "description": "備考"},
+            },
+            "required": ["customer_name", "name"],
+        },
+    },
+]
+
+APP_DB_TOOL_NAMES = {tool["name"] for tool in APP_DB_TOOLS}
+
+
+def _project_summary(p: dict) -> dict:
+    return {k: v for k, v in p.items() if k not in ("photos", "documents", "cover_photo")}
+
+
+def _property_summary(p: dict) -> dict:
+    return {k: v for k, v in p.items() if k != "image"}
+
+
+def _validate_field(allowed_fields: list[str], enum_options: dict, field: str, value: str) -> str | None:
+    """更新項目名・値の妥当性を確認する。問題があればエラーメッセージ、無ければNoneを返す。"""
+    if field not in allowed_fields:
+        return f"「{field}」という項目は更新できません。指定できる項目: {', '.join(allowed_fields)}"
+    options = enum_options.get(field)
+    if options is not None and value not in options:
+        return f"「{field}」に指定できる値は次のいずれかです: {', '.join(options)}"
+    return None
+
+
+def _find_customer_by_name(customer_name: str) -> dict | None:
+    return next((dict(c) for c in get_all_customers() if c["name"] == customer_name), None)
+
+
+def _run_db_tool(name: str, tool_input: dict) -> str:
+    """顧客・顧客担当者・協力会社・案件・物件のデータベースを操作するツールを実行する。"""
+    try:
+        if name == "search_customers_db":
+            rows = search_customers(tool_input.get("keyword", ""))
+            return json.dumps([dict(r) for r in rows], ensure_ascii=False)
+        if name == "update_customer_field":
+            field, value = tool_input["field"], tool_input["value"]
+            error = _validate_field(CUSTOMER_UPDATABLE_FIELDS, CUSTOMER_FIELD_OPTIONS, field, value)
+            if error:
+                return error
+            update_customer_fields(tool_input["customer_id"], **{field: value})
+            return "顧客情報を更新しました。"
+        if name == "add_customer_db":
+            add_customer(
+                tool_input.get("name", "").strip(), tool_input.get("kana", ""),
+                tool_input.get("honorific", "様"), tool_input.get("phone", ""),
+                tool_input.get("fax", ""), tool_input.get("email", ""),
+                tool_input.get("postal_code", ""), tool_input.get("address", ""),
+                tool_input.get("referrer", ""), tool_input.get("memo", ""),
+                entity_type=tool_input.get("entity_type", "個人"),
+            )
+            return "顧客を登録しました。"
+
+        if name == "search_customer_contacts_db":
+            rows = search_customer_contacts(tool_input.get("keyword", ""))
+            return json.dumps([dict(r) for r in rows], ensure_ascii=False)
+        if name == "update_customer_contact_field":
+            field, value = tool_input["field"], tool_input["value"]
+            error = _validate_field(CONTACT_UPDATABLE_FIELDS, CONTACT_FIELD_OPTIONS, field, value)
+            if error:
+                return error
+            update_customer_contact_fields(tool_input["contact_id"], **{field: value})
+            return "顧客担当者の情報を更新しました。"
+        if name == "add_customer_contact_db":
+            customer = _find_customer_by_name(tool_input["customer_name"])
+            if customer is None:
+                return f"「{tool_input['customer_name']}」という顧客が見つかりません。search_customers_dbで正しい顧客名を確認してください。"
+            add_customer_contact(
+                customer["id"], customer["name"],
+                tool_input.get("name", "").strip(), tool_input.get("kana", ""),
+                tool_input.get("honorific", "様"), tool_input.get("title", ""),
+                tool_input.get("email", ""), tool_input.get("memo", ""),
+            )
+            return "顧客担当者を登録しました。"
+
+        if name == "search_vendors_db":
+            rows = search_vendors(tool_input.get("keyword", ""))
+            return json.dumps([dict(r) for r in rows], ensure_ascii=False)
+        if name == "update_vendor_field":
+            field, value = tool_input["field"], tool_input["value"]
+            error = _validate_field(VENDOR_UPDATABLE_FIELDS, VENDOR_FIELD_OPTIONS, field, value)
+            if error:
+                return error
+            update_vendor_fields(tool_input["vendor_id"], **{field: value})
+            return "協力会社の情報を更新しました。"
+        if name == "add_vendor_db":
+            add_vendor(
+                tool_input.get("name", "").strip(), tool_input.get("kana", ""),
+                tool_input.get("phone", ""), tool_input.get("email", ""),
+                tool_input.get("address", ""), tool_input.get("memo", ""),
+                honorific=tool_input.get("honorific", "様"), fax=tool_input.get("fax", ""),
+                postal_code=tool_input.get("postal_code", ""), referrer=tool_input.get("referrer", ""),
+            )
+            return "協力会社を登録しました。"
+
+        if name == "search_projects_db":
+            keyword = tool_input.get("keyword", "").strip()
+            projects = [p for p in project_store.get_all_projects() if not p.get("archived")]
+            if keyword:
+                projects = [
+                    p for p in projects
+                    if keyword in (p.get("name") or "") or keyword in (p.get("customer_name") or "")
+                ]
+            return json.dumps([_project_summary(p) for p in projects], ensure_ascii=False)
+        if name == "update_project_field":
+            field, value = tool_input["field"], tool_input["value"]
+            error = _validate_field(PROJECT_UPDATABLE_FIELDS, PROJECT_FIELD_OPTIONS, field, value)
+            if error:
+                return error
+            project_store.update_project_fields(tool_input["project_id"], **{field: value})
+            return "案件情報を更新しました。"
+        if name == "add_project_db":
+            project = project_store.create_project(tool_input["name"].strip())
+            return f"案件を登録しました（id: {project['id']}）。他の項目はupdate_project_fieldで設定できます。"
+
+        if name == "search_properties_db":
+            keyword = tool_input.get("keyword", "").strip()
+            properties = property_store.get_all_properties()
+            if keyword:
+                properties = [
+                    p for p in properties
+                    if keyword in (p.get("name") or "") or keyword in (p.get("customer_name") or "")
+                    or keyword in (p.get("address") or "")
+                ]
+            return json.dumps([_property_summary(p) for p in properties], ensure_ascii=False)
+        if name == "update_property_field":
+            field, value = tool_input["field"], tool_input["value"]
+            error = _validate_field(PROPERTY_UPDATABLE_FIELDS, PROPERTY_FIELD_OPTIONS, field, value)
+            if error:
+                return error
+            property_store.update_property_fields(tool_input["property_id"], **{field: value})
+            return "物件情報を更新しました。"
+        if name == "add_property_db":
+            customer = _find_customer_by_name(tool_input["customer_name"])
+            if customer is None:
+                return f"「{tool_input['customer_name']}」という顧客が見つかりません。search_customers_dbで正しい顧客名を確認してください。"
+            new_property = property_store.add_property(
+                customer["id"], customer["name"],
+                tool_input.get("name", "").strip(), tool_input.get("kana", ""),
+                tool_input.get("property_type", property_store.PROPERTY_TYPE_OPTIONS[0]),
+                tool_input.get("address_type", property_store.ADDRESS_TYPE_SAME_AS_CUSTOMER),
+                tool_input.get("address", ""), tool_input.get("office", ""),
+                tool_input.get("staff", ""), tool_input.get("memo", ""),
+            )
+            return f"物件を登録しました（id: {new_property['id']}）。外観画像は物件管理ページから登録してください。"
+
+        return f"不明なツールです: {name}"
+    except Exception as exc:  # noqa: BLE001 — ツール結果としてエラー内容をClaudeに返すため
+        return f"エラーが発生しました: {exc}"
 
 
 def _current_spreadsheet_id(category: str) -> str | None:
@@ -437,6 +856,13 @@ def _build_context_summary(category: str) -> str:
         f"- 書類の合計金額の総計: {total_amount:,}円\n",
         "現在表示中のスプレッドシートのセルや列幅を読み書きするツールが使えます。"
         "ユーザーからスプレッドシートの内容確認や編集を頼まれたら、必要に応じてツールを使ってください。\n",
+        "それとは別に、アプリ本体のデータベース（顧客・顧客担当者・協力会社・案件・物件）を"
+        "検索・登録・修正するツールも使えます。ユーザーから「〇〇さんの郵便番号を登録して」"
+        "「△△様の電話番号を直して」のような、アプリのデータそのものへの操作を頼まれたときは、"
+        "スプレッドシートの話だと決めつけず、まずsearch_customers_dbなどの検索ツールで対象を"
+        "確認してから、update_customer_fieldなどの更新ツールを使ってください。"
+        "登録データの削除だけはこれらのツールでは行えません（削除が必要な場合は、該当ページの"
+        "削除確認つきの画面から手動で行うようご案内してください）。\n",
     ]
     if category == "見積書":
         rules = _load_estimate_skill_rules()
@@ -504,7 +930,7 @@ def _call_claude(messages: list[dict], category: str) -> str:
             model=MODEL_NAME,
             max_tokens=32000,
             system=_build_context_summary(category),
-            tools=SHEET_TOOLS,
+            tools=SHEET_TOOLS + APP_DB_TOOLS,
             messages=conversation,
         ) as stream:
             response = stream.get_final_message()
@@ -522,7 +948,10 @@ def _call_claude(messages: list[dict], category: str) -> str:
         tool_results = []
         for block in response.content:
             if block.type == "tool_use":
-                result = _run_sheet_tool(block.name, block.input, category)
+                if block.name in APP_DB_TOOL_NAMES:
+                    result = _run_db_tool(block.name, block.input)
+                else:
+                    result = _run_sheet_tool(block.name, block.input, category)
                 tool_results.append(
                     {"type": "tool_result", "tool_use_id": block.id, "content": result}
                 )

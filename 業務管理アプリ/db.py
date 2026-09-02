@@ -179,6 +179,26 @@ def init_db() -> None:
     conn.close()
 
 
+def _update_fields(table: str, row_id, fields: dict) -> None:
+    """指定したテーブルの1行について、渡されたフィールドだけを更新する（部分更新）。
+
+    アプリのチャットから「この項目だけ直したい」という操作を行うために使う
+    （フォーム経由の更新は全項目をまとめて渡す既存のupdate_*関数を使う）。
+    """
+    if not fields:
+        return
+    now = datetime.now().isoformat(timespec="seconds")
+    set_clause = ", ".join(f"{column} = ?" for column in fields)
+    conn = get_connection()
+    conn.execute(
+        f"UPDATE {table} SET {set_clause}, updated_at = ? WHERE id = ?",
+        (*fields.values(), now, row_id),
+    )
+    conn.commit()
+    conn.close()
+    _backup_db_to_drive()
+
+
 def add_customer(
     name, kana, honorific, phone, fax, email, postal_code, address, referrer, memo, entity_type="個人"
 ) -> None:
@@ -215,6 +235,10 @@ def update_customer(
     conn.commit()
     conn.close()
     _backup_db_to_drive()
+
+
+def update_customer_fields(customer_id, **fields) -> None:
+    _update_fields("customers", customer_id, fields)
 
 
 def delete_customer(customer_id) -> None:
@@ -286,6 +310,10 @@ def update_customer_contact(contact_id, customer_id, customer_name, name, kana, 
     conn.commit()
     conn.close()
     _backup_db_to_drive()
+
+
+def update_customer_contact_fields(contact_id, **fields) -> None:
+    _update_fields("customer_contacts", contact_id, fields)
 
 
 def delete_customer_contact(contact_id) -> None:
@@ -440,6 +468,10 @@ def update_vendor(
     conn.commit()
     conn.close()
     _backup_db_to_drive()
+
+
+def update_vendor_fields(vendor_id, **fields) -> None:
+    _update_fields("vendors", vendor_id, fields)
 
 
 def delete_vendor(vendor_id) -> None:
