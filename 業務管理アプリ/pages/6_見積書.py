@@ -47,13 +47,13 @@ def _format_customer_honorific(name: str) -> str:
     return name.strip() + " 様"
 
 
-def _compute_honorific_fields(customer_row: dict, contact_override: dict | None = None) -> tuple[str, str]:
-    """顧客の敬称・担当者登録状況に応じて、(A9・B4に入れる宛名, B3に入れる顧客名) を返す。
+def _compute_honorific_fields(customer_row: dict, contact_override: dict | None = None) -> tuple[str, str, str]:
+    """顧客の敬称・担当者登録状況に応じて、(A9に入れる宛名, B4に入れる値, B5に入れる宛名) を返す。
 
-    - contact_overrideが指定されている場合: その担当者の氏名+敬称を使う（見積書作成時に
-      顧客担当者を明示的に選んだ場合）。B3に顧客名を入れる。
-    - 顧客担当者が未登録: 顧客名+顧客自身の敬称（様/御中）。B3は使わない。
-    - 顧客担当者が登録済み（指定なし）: 最初の担当者の氏名+その担当者の敬称。B3に顧客名を入れる。
+    - 顧客担当者が未登録（個人・法人本体宛）: B4に「顧客名+顧客自身の敬称（様/御中）」を入れる。
+      A9も同じ値。B5は使わない（空文字）。
+    - 顧客担当者宛（contact_overrideで明示的に選んだ場合、または未指定なら最初の担当者を自動選択）:
+      B4に敬称なしの会社名（顧客名）、B5に「担当者名+担当者の敬称」を入れる。A9もB5と同じ値。
     """
     name = (customer_row.get("name") or "").strip()
     honorific = customer_row.get("honorific") or "様"
@@ -64,21 +64,21 @@ def _compute_honorific_fields(customer_row: dict, contact_override: dict | None 
     else:
         contacts = get_customer_contacts_for_customer(customer_id) if customer_id is not None else []
     if not contacts:
-        if honorific == "様":
-            return _format_customer_honorific(name), ""
-        return f"{name} {honorific}", ""
+        formatted = _format_customer_honorific(name) if honorific == "様" else f"{name} {honorific}"
+        return formatted, formatted, ""
 
     first_contact = contacts[0]
     contact_name = (first_contact["name"] or "").strip()
     contact_honorific = first_contact["honorific"] or "様"
-    if contact_honorific == "様":
-        return _format_customer_honorific(contact_name), name
-    return f"{contact_name} {contact_honorific}", name
+    contact_formatted = (
+        _format_customer_honorific(contact_name) if contact_honorific == "様" else f"{contact_name} {contact_honorific}"
+    )
+    return contact_formatted, name, contact_formatted
 
 
 def _find_previous_estimate_honorific(customer_name: str, exclude_project_id) -> dict | None:
     """同じ顧客名で過去に見積書を作成した案件があれば、そこで使われている
-    A9・B3・B4セルの値をそのまま返す（後から手直しした表記も含めて引き継ぐため）。
+    A9・B4・B5セルの値をそのまま返す（後から手直しした表記も含めて引き継ぐため）。
     見つからなければNoneを返す。
     """
     if not customer_name:
@@ -96,13 +96,13 @@ def _find_previous_estimate_honorific(customer_name: str, exclude_project_id) ->
     prev_spreadsheet_id = candidates[0]["spreadsheet_id"]
     try:
         a9 = sheets.read_cell(prev_spreadsheet_id, ESTIMATE_DETAIL_SHEET, "A9")
-        b3 = sheets.read_cell(prev_spreadsheet_id, ESTIMATE_DETAIL_SHEET, "B3")
         b4 = sheets.read_cell(prev_spreadsheet_id, ESTIMATE_DETAIL_SHEET, "B4")
+        b5 = sheets.read_cell(prev_spreadsheet_id, ESTIMATE_DETAIL_SHEET, "B5")
     except Exception:
         return None
     if not a9 and not b4:
         return None
-    return {"a9": a9 or "", "b3": b3 or "", "b4": b4 or ""}
+    return {"a9": a9 or "", "b4": b4 or "", "b5": b5 or ""}
 
 
 def _fill_estimate_defaults(
@@ -128,16 +128,14 @@ def _fill_estimate_defaults(
         )
         if previous is not None:
             # 同じ顧客の過去の見積書があれば、その表記（手直し済みの可能性がある）をそのまま引き継ぐ。
-            if previous["b3"]:
-                sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "B3", previous["b3"])
             sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "B4", previous["b4"])
+            sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "B5", previous["b5"])
             sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "A9", previous["a9"])
         else:
-            honorific, company_name_for_b3 = _compute_honorific_fields(customer_row, contact_override=contact_override)
-            if company_name_for_b3:
-                sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "B3", company_name_for_b3)
-            sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "B4", honorific)
-            sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "A9", honorific)
+            a9_value, b4_value, b5_value = _compute_honorific_fields(customer_row, contact_override=contact_override)
+            sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "B4", b4_value)
+            sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "B5", b5_value)
+            sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "A9", a9_value)
 
         address = (customer_row.get("address") or "").strip()
         if address:
