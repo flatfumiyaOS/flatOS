@@ -166,6 +166,8 @@ def init_db() -> None:
     _ensure_column(conn, "customers", "postal_code", "postal_code TEXT NOT NULL DEFAULT ''")
     _ensure_column(conn, "customers", "fax", "fax TEXT NOT NULL DEFAULT ''")
     _ensure_column(conn, "customers", "referrer", "referrer TEXT NOT NULL DEFAULT ''")
+    # 顧客担当者データベースの電話番号欄。
+    _ensure_column(conn, "customer_contacts", "phone", "phone TEXT NOT NULL DEFAULT ''")
     # 協力会社データベースの敬称・郵便番号・FAX・紹介者・評価欄。
     _ensure_column(conn, "vendors", "honorific", "honorific TEXT NOT NULL DEFAULT '様'")
     _ensure_column(conn, "vendors", "postal_code", "postal_code TEXT NOT NULL DEFAULT ''")
@@ -279,33 +281,35 @@ def search_customers(keyword: str):
     return rows
 
 
-def add_customer_contact(customer_id, customer_name, name, kana, honorific, title, email, memo) -> None:
+def add_customer_contact(customer_id, customer_name, name, kana, honorific, title, phone, email, memo) -> None:
     now = datetime.now().isoformat(timespec="seconds")
     conn = get_connection()
     conn.execute(
         """
         INSERT INTO customer_contacts
-            (customer_id, customer_name, name, kana, honorific, title, email, memo, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (customer_id, customer_name, name, kana, honorific, title, phone, email, memo, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (customer_id, customer_name, name, kana, honorific, title, email, memo, now, now),
+        (customer_id, customer_name, name, kana, honorific, title, phone, email, memo, now, now),
     )
     conn.commit()
     conn.close()
     _backup_db_to_drive()
 
 
-def update_customer_contact(contact_id, customer_id, customer_name, name, kana, honorific, title, email, memo) -> None:
+def update_customer_contact(
+    contact_id, customer_id, customer_name, name, kana, honorific, title, phone, email, memo
+) -> None:
     now = datetime.now().isoformat(timespec="seconds")
     conn = get_connection()
     conn.execute(
         """
         UPDATE customer_contacts
         SET customer_id = ?, customer_name = ?, name = ?, kana = ?, honorific = ?,
-            title = ?, email = ?, memo = ?, updated_at = ?
+            title = ?, phone = ?, email = ?, memo = ?, updated_at = ?
         WHERE id = ?
         """,
-        (customer_id, customer_name, name, kana, honorific, title, email, memo, now, contact_id),
+        (customer_id, customer_name, name, kana, honorific, title, phone, email, memo, now, contact_id),
     )
     conn.commit()
     conn.close()
@@ -347,10 +351,10 @@ def search_customer_contacts(keyword: str):
     rows = conn.execute(
         """
         SELECT * FROM customer_contacts
-        WHERE name LIKE ? OR kana LIKE ? OR title LIKE ? OR email LIKE ? OR customer_name LIKE ?
+        WHERE name LIKE ? OR kana LIKE ? OR title LIKE ? OR phone LIKE ? OR email LIKE ? OR customer_name LIKE ?
         ORDER BY id DESC
         """,
-        (like, like, like, like, like),
+        (like, like, like, like, like, like),
     ).fetchall()
     conn.close()
     return rows

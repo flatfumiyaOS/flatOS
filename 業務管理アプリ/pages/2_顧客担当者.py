@@ -49,6 +49,7 @@ with st.expander("新しい担当者を登録する", expanded=False):
                 honorific = st.selectbox("敬称 *", options=HONORIFIC_OPTIONS)
             with col2:
                 title = st.text_input("肩書")
+                phone = st.text_input("TEL")
                 email = st.text_input("MAIL")
             memo = st.text_area("備考")
 
@@ -60,7 +61,7 @@ with st.expander("新しい担当者を登録する", expanded=False):
                     customer_name = next(c["name"] for c in customers if c["id"] == customer_id)
                     add_customer_contact(
                         customer_id, customer_name, name.strip(), kana.strip(),
-                        honorific, title.strip(), email.strip(), memo.strip(),
+                        honorific, title.strip(), phone.strip(), email.strip(), memo.strip(),
                     )
                     st.success(f"「{name}」を登録しました。")
                     st.rerun()
@@ -85,6 +86,7 @@ else:
                 "フリガナ": r["kana"],
                 "敬称": r["honorific"],
                 "肩書": r["title"],
+                "TEL": r["phone"],
                 "MAIL": r["email"],
                 "備考": r["memo"],
                 "更新日": r["updated_at"],
@@ -129,6 +131,7 @@ else:
                 e_honorific = st.selectbox("敬称 *", options=HONORIFIC_OPTIONS, index=e_honorific_index)
             with col2:
                 e_title = st.text_input("肩書", value=contact["title"] or "")
+                e_phone = st.text_input("TEL", value=contact["phone"] or "")
                 e_email = st.text_input("MAIL", value=contact["email"] or "")
             e_memo = st.text_area("備考", value=contact["memo"] or "")
 
@@ -145,7 +148,7 @@ else:
                     e_customer_name = next(c["name"] for c in customers if c["id"] == e_customer_id)
                     update_customer_contact(
                         selected_id, e_customer_id, e_customer_name, e_name.strip(), e_kana.strip(),
-                        e_honorific, e_title.strip(), e_email.strip(), e_memo.strip(),
+                        e_honorific, e_title.strip(), e_phone.strip(), e_email.strip(), e_memo.strip(),
                     )
                     st.success("更新しました。")
                     st.rerun()

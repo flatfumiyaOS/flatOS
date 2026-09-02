@@ -232,7 +232,7 @@ CUSTOMER_UPDATABLE_FIELDS = [
 ]
 CUSTOMER_FIELD_OPTIONS = {"entity_type": ["個人", "法人"], "honorific": ["様", "御中"]}
 
-CONTACT_UPDATABLE_FIELDS = ["name", "kana", "honorific", "title", "email", "memo"]
+CONTACT_UPDATABLE_FIELDS = ["name", "kana", "honorific", "title", "phone", "email", "memo"]
 CONTACT_FIELD_OPTIONS = {"honorific": ["様", "御中"]}
 
 VENDOR_UPDATABLE_FIELDS = [
@@ -344,6 +344,7 @@ APP_DB_TOOLS = [
                 "kana": {"type": "string", "description": "フリガナ"},
                 "honorific": {"type": "string", "enum": ["様", "御中"], "description": "敬称（既定: 様）"},
                 "title": {"type": "string", "description": "役職"},
+                "phone": {"type": "string", "description": "TEL"},
                 "email": {"type": "string", "description": "MAIL"},
                 "memo": {"type": "string", "description": "備考"},
             },
@@ -541,7 +542,7 @@ def _run_db_tool(name: str, tool_input: dict) -> str:
                 customer["id"], customer["name"],
                 tool_input.get("name", "").strip(), tool_input.get("kana", ""),
                 tool_input.get("honorific", "様"), tool_input.get("title", ""),
-                tool_input.get("email", ""), tool_input.get("memo", ""),
+                tool_input.get("phone", ""), tool_input.get("email", ""), tool_input.get("memo", ""),
             )
             return "顧客担当者を登録しました。"
 
