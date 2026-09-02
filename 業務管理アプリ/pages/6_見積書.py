@@ -12,7 +12,13 @@ import project_store
 import property_store
 import sheets
 from chat import show_chat_panel, show_chat_toggle
-from db import get_all_customers, get_customer, get_customer_contacts_for_customer, init_db
+from db import (
+    get_all_customer_contacts,
+    get_all_customers,
+    get_customer,
+    get_customer_contacts_for_customer,
+    init_db,
+)
 from layout import APP_ICON_PATH
 from postal import lookup_postal_code
 
@@ -41,17 +47,22 @@ def _format_customer_honorific(name: str) -> str:
     return name.strip() + " 様"
 
 
-def _compute_honorific_fields(customer_row: dict) -> tuple[str, str]:
+def _compute_honorific_fields(customer_row: dict, contact_override: dict | None = None) -> tuple[str, str]:
     """顧客の敬称・担当者登録状況に応じて、(A9・B4に入れる宛名, B3に入れる顧客名) を返す。
 
+    - contact_overrideが指定されている場合: その担当者の氏名+敬称を使う（見積書作成時に
+      顧客担当者を明示的に選んだ場合）。B3に顧客名を入れる。
     - 顧客担当者が未登録: 顧客名+顧客自身の敬称（様/御中）。B3は使わない。
-    - 顧客担当者が登録済み: 最初の担当者の氏名+その担当者の敬称。B3に顧客名を入れる。
+    - 顧客担当者が登録済み（指定なし）: 最初の担当者の氏名+その担当者の敬称。B3に顧客名を入れる。
     """
     name = (customer_row.get("name") or "").strip()
     honorific = customer_row.get("honorific") or "様"
     customer_id = customer_row.get("id")
 
-    contacts = get_customer_contacts_for_customer(customer_id) if customer_id is not None else []
+    if contact_override is not None:
+        contacts = [contact_override]
+    else:
+        contacts = get_customer_contacts_for_customer(customer_id) if customer_id is not None else []
     if not contacts:
         if honorific == "様":
             return _format_customer_honorific(name), ""
@@ -95,9 +106,14 @@ def _find_previous_estimate_honorific(customer_name: str, exclude_project_id) ->
 
 
 def _fill_estimate_defaults(
-    spreadsheet_id: str, customer_row, project_name: str, exclude_project_id=None, office: str = ""
+    spreadsheet_id: str, customer_row, project_name: str, exclude_project_id=None, office: str = "",
+    contact_override: dict | None = None,
 ) -> None:
-    """新規作成した見積書に、顧客名・住所・郵便番号・案件名をあらかじめ入力しておく。"""
+    """新規作成した見積書に、顧客名・住所・郵便番号・案件名をあらかじめ入力しておく。
+
+    contact_overrideは、見積書作成時に顧客ではなく特定の顧客担当者を選んだ場合に渡す。
+    指定されている場合は、過去の見積書からの表記の引き継ぎより、その担当者宛の表記を優先する。
+    """
     overrides = OFFICE_ADDRESS_OVERRIDES.get(office)
     if overrides:
         for cell, value in overrides.items():
@@ -107,7 +123,9 @@ def _fill_estimate_defaults(
         customer_row = dict(customer_row)
         name = (customer_row.get("name") or "").strip()
 
-        previous = _find_previous_estimate_honorific(name, exclude_project_id)
+        previous = (
+            None if contact_override is not None else _find_previous_estimate_honorific(name, exclude_project_id)
+        )
         if previous is not None:
             # 同じ顧客の過去の見積書があれば、その表記（手直し済みの可能性がある）をそのまま引き継ぐ。
             if previous["b3"]:
@@ -115,7 +133,7 @@ def _fill_estimate_defaults(
             sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "B4", previous["b4"])
             sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "A9", previous["a9"])
         else:
-            honorific, company_name_for_b3 = _compute_honorific_fields(customer_row)
+            honorific, company_name_for_b3 = _compute_honorific_fields(customer_row, contact_override=contact_override)
             if company_name_for_b3:
                 sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "B3", company_name_for_b3)
             sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "B4", honorific)
@@ -242,11 +260,6 @@ else:
         horizontal=True,
         key="estimate_source_mode",
     )
-    st.caption(
-        "「案件」: 1つの案件で1件の大きな改修工事を行う場合。"
-        "「物件」: 同じ現場に対して、随時・部分的な工事が何度も発生する場合"
-        "（物件を選び、その都度の工事内容を案件名として入力します）。"
-    )
 
     customers = get_all_customers()
     create_clicked = False
@@ -255,6 +268,7 @@ else:
     properties = []
     property_id = None
     property_project_name = ""
+    contact_options: dict[str, dict] = {}
 
     if source_mode == "案件":
         NEW_PROJECT_CHOICE = "（新規に案件を作成）"
@@ -266,7 +280,14 @@ else:
 
         if project_choice == NEW_PROJECT_CHOICE:
             customer_names = ["（選択してください）"] + [c["name"] for c in customers]
-            st.selectbox("顧客を選択", options=customer_names, key="selected_customer_name")
+            for contact in get_all_customer_contacts():
+                label = f"{contact['customer_name']}　担当: {contact['name']}"
+                contact_options[label] = dict(contact)
+            st.selectbox(
+                "顧客を選択（顧客担当者から選ぶこともできます）",
+                options=customer_names + list(contact_options.keys()),
+                key="selected_customer_name",
+            )
 
             col_name, col_button = st.columns([3, 1])
             with col_name:
@@ -319,13 +340,20 @@ else:
         else:
             with st.spinner("スプレッドシートを作成しています..."):
                 try:
+                    contact_override = None
                     if source_mode == "案件":
                         if project_choice == "（新規に案件を作成）":
                             project_name = new_project_name.strip()
                             selected_name = st.session_state.get("selected_customer_name")
-                            customer_row = next(
-                                (c for c in customers if c["name"] == selected_name), None
-                            )
+                            if selected_name in contact_options:
+                                contact_override = contact_options[selected_name]
+                                customer_row = next(
+                                    (c for c in customers if c["id"] == contact_override["customer_id"]), None
+                                )
+                            else:
+                                customer_row = next(
+                                    (c for c in customers if c["name"] == selected_name), None
+                                )
                         else:
                             linked_project_existing = next(
                                 p for p in existing_projects if p["name"] == project_choice
@@ -389,6 +417,7 @@ else:
                     _fill_estimate_defaults(
                         new_id, customer_row, project_name,
                         exclude_project_id=linked_project["id"], office=linked_project.get("office", ""),
+                        contact_override=contact_override,
                     )
                     _clear_old_example_rows(new_id)
 
