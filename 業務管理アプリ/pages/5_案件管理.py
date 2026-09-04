@@ -18,6 +18,7 @@ from PIL import Image
 import auth_gate
 import google_auth
 import project_store
+import property_store
 import sheets
 from chat import show_chat_panel, show_chat_toggle
 from db import get_all_customers
@@ -261,9 +262,27 @@ elif view_mode == "create":
     customers = get_all_customers()
     customer_names = ["（選択してください）"] + [c["name"] for c in customers]
 
+    # 物件の選択肢は選んだ顧客によって変わるため、顧客名はフォームの外に出す
+    # （フォーム内のウィジェットは送信するまで変更が他のウィジェットに反映されないため）。
+    customer_name = st.selectbox("顧客名", options=customer_names, key="new_project_customer_name")
+    selected_customer = next((c for c in customers if c["name"] == customer_name), None)
+    customer_properties = (
+        property_store.get_properties_for_customer(selected_customer["id"])
+        if selected_customer is not None
+        else []
+    )
+    NO_PROPERTY_CHOICE = "（物件を紐付けない）"
+
     with st.form("new_project_form"):
         new_name = st.text_input("案件名", placeholder="例: 〇〇邸 改修工事")
-        customer_name = st.selectbox("顧客名", options=customer_names)
+        property_id_choice = st.selectbox(
+            "物件（任意）",
+            options=[NO_PROPERTY_CHOICE] + [p["id"] for p in customer_properties],
+            format_func=lambda x: (
+                x if x == NO_PROPERTY_CHOICE else next(p["name"] for p in customer_properties if p["id"] == x)
+            ),
+            help="顧客に登録済みの物件があれば選んで紐付けられます（指定しなくても登録できます）。",
+        )
         address = st.text_input("現場住所")
         col_start, col_end = st.columns(2)
         with col_start:
@@ -325,6 +344,11 @@ elif view_mode == "create":
                     billing_timing, billing_due_date_value.isoformat(),
                     category1, category2, category3, billing_status,
                 )
+                if property_id_choice != NO_PROPERTY_CHOICE:
+                    linked_property = next(p for p in customer_properties if p["id"] == property_id_choice)
+                    project_store.set_property_link(
+                        new_project["id"], linked_property["id"], linked_property["name"]
+                    )
                 if cover_photo_file is not None:
                     project_store.set_cover_photo(
                         new_project["id"], cover_photo_file.name, cover_photo_file.getvalue()
