@@ -262,7 +262,8 @@ elif view_mode == "create":
     customers = get_all_customers()
     customer_names = ["（選択してください）"] + [c["name"] for c in customers]
 
-    # 物件の選択肢は選んだ顧客によって変わるため、顧客名はフォームの外に出す
+    # 物件の選択肢は選んだ顧客によって変わり、また物件を選ぶと現場住所・自社支社・
+    # 自社担当者を自動入力したいため、顧客名・物件名はどちらもフォームの外に出す
     # （フォーム内のウィジェットは送信するまで変更が他のウィジェットに反映されないため）。
     customer_name = st.selectbox("顧客名", options=customer_names, key="new_project_customer_name")
     selected_customer = next((c for c in customers if c["name"] == customer_name), None)
@@ -272,34 +273,72 @@ elif view_mode == "create":
         else []
     )
     NO_PROPERTY_CHOICE = "（物件を紐付けない）"
+    property_option_ids = [NO_PROPERTY_CHOICE] + [p["id"] for p in customer_properties]
+
+    # 顧客を切り替えたことで物件の選択肢が変わり、以前選んでいた物件idが選択肢に
+    # 無くなっている場合、ウィジェット生成前にリセットしないとエラーになる。
+    if (
+        "new_project_property_choice" in st.session_state
+        and st.session_state["new_project_property_choice"] not in property_option_ids
+    ):
+        del st.session_state["new_project_property_choice"]
+
+    property_id_choice = st.selectbox(
+        "物件（任意）",
+        options=property_option_ids,
+        format_func=lambda x: (
+            x if x == NO_PROPERTY_CHOICE else next(p["name"] for p in customer_properties if p["id"] == x)
+        ),
+        key="new_project_property_choice",
+        help="顧客に登録済みの物件を選ぶと、現場住所・自社支社・自社担当者・外観写真を自動で入力します（指定しなくても登録できます）。",
+    )
+    linked_property = (
+        next((p for p in customer_properties if p["id"] == property_id_choice), None)
+        if property_id_choice != NO_PROPERTY_CHOICE
+        else None
+    )
+
+    # 物件の選択が変わったときだけ、現場住所・自社支社・自社担当者を自動入力する
+    # （postal.pyの郵便番号→住所の自動入力と同じ、ウィジェット生成前にsession_stateへ
+    # 直接反映するパターン。選択が変わるたびに上書きするので、手入力後に選び直すと
+    # 手入力した内容は自動入力の内容で置き換わる）。
+    if st.session_state.get("_new_project_property_autofill_source") != property_id_choice:
+        st.session_state["_new_project_property_autofill_source"] = property_id_choice
+        if linked_property is not None:
+            if linked_property["address_type"] == property_store.ADDRESS_TYPE_SAME_AS_CUSTOMER:
+                effective_address = (selected_customer["address"] or "") if selected_customer else ""
+            else:
+                effective_address = linked_property["address"] or ""
+            st.session_state["new_project_address"] = effective_address
+            if linked_property.get("office") in project_store.OFFICE_OPTIONS:
+                st.session_state["new_project_office"] = linked_property["office"]
+            if linked_property.get("staff") in project_store.STAFF_OPTIONS:
+                st.session_state["new_project_staff"] = linked_property["staff"]
 
     with st.form("new_project_form"):
         new_name = st.text_input("案件名", placeholder="例: 〇〇邸 改修工事")
-        property_id_choice = st.selectbox(
-            "物件（任意）",
-            options=[NO_PROPERTY_CHOICE] + [p["id"] for p in customer_properties],
-            format_func=lambda x: (
-                x if x == NO_PROPERTY_CHOICE else next(p["name"] for p in customer_properties if p["id"] == x)
-            ),
-            help="顧客に登録済みの物件があれば選んで紐付けられます（指定しなくても登録できます）。",
-        )
-        address = st.text_input("現場住所")
+        if linked_property is not None:
+            st.caption(f"物件「{linked_property['name']}」を紐付けます。")
+        address = st.text_input("現場住所", key="new_project_address")
         col_start, col_end = st.columns(2)
         with col_start:
             start_date_value = st.date_input("着工予定日", value=datetime.date.today())
         with col_end:
             end_date_value = st.date_input("完工予定日", value=datetime.date.today())
         overview = st.text_area("工事概要", height=120)
+        cover_photo_help = "案件一覧カードの表紙に使います。"
+        if linked_property is not None and linked_property.get("image"):
+            cover_photo_help += "未添付の場合、物件に登録済みの外観写真を自動で使います。"
         cover_photo_file = st.file_uploader(
-            "現場建物写真（案件一覧カードの表紙に使います）", type=["jpg", "jpeg", "png"]
+            "現場建物写真", type=["jpg", "jpeg", "png"], help=cover_photo_help
         )
 
         st.markdown("##### 自社情報")
         col_office, col_staff = st.columns(2)
         with col_office:
-            office = st.selectbox("自社支社", options=project_store.OFFICE_OPTIONS)
+            office = st.selectbox("自社支社", options=project_store.OFFICE_OPTIONS, key="new_project_office")
         with col_staff:
-            staff = st.selectbox("自社担当者", options=project_store.STAFF_OPTIONS)
+            staff = st.selectbox("自社担当者", options=project_store.STAFF_OPTIONS, key="new_project_staff")
 
         st.markdown("##### ステータス・分類")
         col_order, col_billing_timing, col_billing_status = st.columns(3)
@@ -344,8 +383,7 @@ elif view_mode == "create":
                     billing_timing, billing_due_date_value.isoformat(),
                     category1, category2, category3, billing_status,
                 )
-                if property_id_choice != NO_PROPERTY_CHOICE:
-                    linked_property = next(p for p in customer_properties if p["id"] == property_id_choice)
+                if linked_property is not None:
                     project_store.set_property_link(
                         new_project["id"], linked_property["id"], linked_property["name"]
                     )
@@ -353,6 +391,13 @@ elif view_mode == "create":
                     project_store.set_cover_photo(
                         new_project["id"], cover_photo_file.name, cover_photo_file.getvalue()
                     )
+                elif linked_property is not None and linked_property.get("image"):
+                    # 表紙写真が未添付なら、紐付けた物件の外観写真をそのまま表紙に使う。
+                    property_image_bytes = property_store.get_property_image_bytes(linked_property["id"])
+                    if property_image_bytes is not None:
+                        project_store.set_cover_photo(
+                            new_project["id"], linked_property["image"]["filename"], property_image_bytes
+                        )
                 st.success(f"「{new_name}」を登録しました。")
                 _go_to_detail(new_project["id"])
                 st.rerun()
