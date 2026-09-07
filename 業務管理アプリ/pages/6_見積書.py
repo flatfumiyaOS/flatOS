@@ -252,6 +252,50 @@ if not google_auth.is_logged_in():
     st.link_button("Googleでログイン", google_auth.get_login_url())
     st.caption("新しい案件の見積書を作成するには、Googleアカウントでログインしてください。")
 else:
+    # --- 作成済みの見積書を開く（続きの編集・チャットでの修正用） ---
+    existing_estimate_projects = [
+        p
+        for p in project_store.get_all_projects()
+        if p.get("spreadsheet_id") and not p.get("archived")
+    ]
+    existing_estimate_projects.sort(key=lambda p: p.get("updated_at", ""), reverse=True)
+    estimate_options = {
+        p["id"]: f"{p.get('customer_name') or '顧客未設定'} / {p['name']}"
+        for p in existing_estimate_projects
+    }
+
+    with st.container(border=True):
+        col_select, col_open = st.columns([3, 1])
+        with col_select:
+            selected_estimate_project_id = (
+                st.selectbox(
+                    "作成済みの見積書を選択",
+                    options=list(estimate_options.keys()),
+                    format_func=lambda x: estimate_options[x],
+                    key="select_existing_estimate",
+                )
+                if estimate_options
+                else None
+            )
+            if not estimate_options:
+                st.caption("まだ見積書が作成されていません。")
+        with col_open:
+            st.write("")
+            if st.button(
+                "開く",
+                key="open_existing_estimate_button",
+                width="stretch",
+                disabled=selected_estimate_project_id is None,
+            ):
+                selected_estimate_project = next(
+                    p for p in existing_estimate_projects if p["id"] == selected_estimate_project_id
+                )
+                st.session_state["current_spreadsheet_id"] = selected_estimate_project["spreadsheet_id"]
+                st.session_state["current_project_name"] = selected_estimate_project["name"]
+                st.rerun()
+
+    st.divider()
+
     source_mode = st.radio(
         "見積書のもとになる情報",
         options=["案件", "物件"],
