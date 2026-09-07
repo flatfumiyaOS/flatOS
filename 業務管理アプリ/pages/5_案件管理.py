@@ -714,8 +714,19 @@ elif view_mode == "detail":
                 'style="width:100%; height:70vh; border:none;"></iframe>',
                 unsafe_allow_html=True,
             )
+            with st.expander("見積書の連携を解除する"):
+                st.caption(
+                    "連携を解除すると、この案件と今表示中のスプレッドシートとの紐付けが"
+                    "外れます（スプレッドシート自体は削除されません。Googleドライブには"
+                    "残ります）。解除後、別の見積書スプレッドシートのURLを入力して"
+                    "連携し直すこともできます。"
+                )
+                if st.button("連携を解除する", key="unlink_estimate_button"):
+                    project_store.set_spreadsheet_id(selected_id, None)
+                    st.success("連携を解除しました。")
+                    st.rerun()
         else:
-            st.info("この案件にはまだ見積書が作成されていません。")
+            st.info("この案件にはまだ見積書が連携されていません。")
             if not google_auth.is_logged_in():
                 st.link_button("Googleでログイン", google_auth.get_login_url())
                 st.caption("見積書を作成するには、Googleアカウントでログインしてください。")
@@ -730,6 +741,24 @@ elif view_mode == "detail":
                         st.rerun()
                     except Exception as exc:
                         st.error(f"作成に失敗しました: {exc}")
+
+            st.divider()
+            st.caption(
+                "すでに作成済みの見積書スプレッドシートがある場合は、URLまたはIDを"
+                "入力して連携できます（編集途中の見積書を続けたい場合など）。"
+            )
+            estimate_link_input = st.text_input(
+                "見積書スプレッドシートのURLまたはID",
+                key=f"estimate_link_input_{selected_id}",
+            )
+            if st.button("連携する", key="link_estimate_button"):
+                if estimate_link_input.strip():
+                    new_estimate_id = _extract_spreadsheet_id(estimate_link_input.strip())
+                    project_store.set_spreadsheet_id(selected_id, new_estimate_id)
+                    st.success("見積書を連携しました。")
+                    st.rerun()
+                else:
+                    st.error("URLまたはIDを入力してください。")
 
 # チャットのトグル・パネルは、ページ固有のウィジェット（一覧のフィルターや詳細の
 # タブなど）をすべて生成し終えたあとに呼び出す。先に呼び出すと、チャットの開閉
