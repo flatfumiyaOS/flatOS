@@ -159,6 +159,69 @@ def _go_to_detail(project_id: int) -> None:
     st.session_state["project_view_mode"] = "detail"
 
 
+def _copy_project(project: dict) -> tuple[dict, str | None]:
+    """案件の基本情報・物件紐付け・表紙写真・見積書スプレッドシートを複製した、
+    新しい案件を作成する。元の案件・見積書スプレッドシートには一切手を加えない。
+
+    同じような内容の別バージョンを作りたい（例: 見積内容の異なる案を並行して
+    検討したい）場合に使う。受注ステータス・請求ステータスは、コピー元がすでに
+    受注済・請求済であっても、コピー先では初期値に戻す（そのまま引き継ぐと、
+    同じ案件が2件分の売上として計上されてしまうため）。
+
+    戻り値: (新しい案件, 見積書スプレッドシートのコピーに失敗した場合のエラーメッセージ)
+    """
+    new_project = project_store.create_project(f"{project['name']}（コピー）")
+    project_store.update_basic_info(
+        new_project["id"],
+        project.get("customer_name", ""),
+        project.get("address", ""),
+        project.get("start_date", ""),
+        project.get("end_date", ""),
+        project.get("overview", ""),
+    )
+    project_store.update_case_details(
+        new_project["id"],
+        project.get("office", ""),
+        project.get("staff", ""),
+        project.get("payment_terms", ""),
+        project_store.ORDER_STATUS_OPTIONS[0],
+        project.get("billing_timing", ""),
+        "",
+        project.get("category1", ""),
+        project.get("category2", ""),
+        project.get("category3", ""),
+        project_store.BILLING_STATUS_UNBILLED,
+    )
+    if project.get("property_id"):
+        project_store.set_property_link(
+            new_project["id"], project["property_id"], project.get("property_name", "")
+        )
+    if project.get("cover_photo"):
+        cover_bytes = project_store.get_file_bytes(project["cover_photo"])
+        if cover_bytes is not None:
+            project_store.set_cover_photo(
+                new_project["id"], project["cover_photo"]["filename"], cover_bytes
+            )
+
+    spreadsheet_error = None
+    if project.get("spreadsheet_id"):
+        if not google_auth.is_logged_in():
+            spreadsheet_error = (
+                "見積書スプレッドシートはコピーされませんでした"
+                "（Googleにログインしていないため）。あとで「見積連携」タブから連携してください。"
+            )
+        else:
+            try:
+                new_spreadsheet_id = sheets.copy_spreadsheet(
+                    project["spreadsheet_id"], f"{new_project['name']}", google_auth.get_credentials()
+                )
+                project_store.set_spreadsheet_id(new_project["id"], new_spreadsheet_id)
+            except Exception as exc:
+                spreadsheet_error = f"見積書スプレッドシートのコピーに失敗しました: {exc}"
+
+    return project_store.get_project(new_project["id"]), spreadsheet_error
+
+
 st.set_page_config(page_title="案件管理", page_icon=str(APP_ICON_PATH), layout="wide")
 auth_gate.require_password()
 
@@ -411,9 +474,20 @@ elif view_mode == "detail":
         _go_to_list()
         st.rerun()
 
-    if st.button("← 案件一覧に戻る", key="back_to_list_from_detail"):
-        _go_to_list()
-        st.rerun()
+    col_back, col_copy = st.columns([3, 1])
+    with col_back:
+        if st.button("← 案件一覧に戻る", key="back_to_list_from_detail"):
+            _go_to_list()
+            st.rerun()
+    with col_copy:
+        if st.button("この案件をコピーする", key="copy_project_button", width="stretch"):
+            with st.spinner("案件をコピーしています..."):
+                copied_project, spreadsheet_error = _copy_project(project)
+            if spreadsheet_error:
+                st.warning(spreadsheet_error)
+            st.success(f"「{copied_project['name']}」としてコピーしました。")
+            _go_to_detail(copied_project["id"])
+            st.rerun()
 
     st.title(f"📁 {project['name']}")
     caption_text = f"顧客名: {project.get('customer_name') or '未設定'}"
