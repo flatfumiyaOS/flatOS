@@ -738,11 +738,13 @@ def _build_user_content(text: str, uploaded_file) -> str | list[dict]:
         file_block = {
             "type": "document",
             "source": {"type": "base64", "media_type": media_type, "data": data_b64},
+            "filename": uploaded_file.name,
         }
     else:
         file_block = {
             "type": "image",
             "source": {"type": "base64", "media_type": media_type, "data": data_b64},
+            "filename": uploaded_file.name,
         }
 
     content: list[dict] = [file_block]
@@ -907,6 +909,53 @@ def _summarize_for_memory(messages: list[dict], category: str) -> str:
     return "".join(block.text for block in response.content if block.type == "text").strip()
 
 
+def _upload_file_block_once(client: "anthropic.Anthropic", block: dict) -> dict:
+    """添付ファイル（画像・PDF）のブロックをFiles APIに一度だけアップロードし、
+    file_idを参照するブロックを返す。
+
+    アップロード結果（file_id）はblock自体（st.session_state["chat_messages"]内の
+    同じ辞書オブジェクト）に書き戻してキャッシュする。これにより、同じ添付ファイルを
+    含む会話が何往復も続いても、2回目以降はファイルの中身（base64データ）を
+    毎回送り直さずに済む（送信データが大きくなりすぎて、Anthropic APIの1リクエスト
+    あたりの上限（32MB）に達してしまう問題への対策）。
+    """
+    source = block["source"]
+    if source.get("type") == "file":
+        return block  # 既にfile_id化済み
+
+    cached_file_id = block.get("_file_id")
+    if cached_file_id is None:
+        data_bytes = base64.b64decode(source["data"])
+        media_type = source["media_type"]
+        filename = block.get("filename") or "attachment"
+        uploaded = client.files.upload(file=(filename, data_bytes, media_type))
+        cached_file_id = uploaded.id
+        block["_file_id"] = cached_file_id
+
+    return {"type": block["type"], "source": {"type": "file", "file_id": cached_file_id}}
+
+
+def _prepare_conversation_for_api(client: "anthropic.Anthropic", messages: list[dict]) -> list[dict]:
+    """会話履歴をAPI送信用に変換する。添付ファイルを含むユーザーメッセージがあれば、
+    Files API経由のfile_id参照に置き換える（画像・PDFの添付が発生しうるのは
+    ユーザーメッセージのみのため、それ以外はそのまま渡す）。
+    """
+    prepared = []
+    for message in messages:
+        content = message["content"]
+        if message["role"] != "user" or not isinstance(content, list):
+            prepared.append(message)
+            continue
+        new_content = [
+            _upload_file_block_once(client, block)
+            if isinstance(block, dict) and block.get("type") in ("image", "document")
+            else block
+            for block in content
+        ]
+        prepared.append({"role": message["role"], "content": new_content})
+    return prepared
+
+
 def _call_claude(messages: list[dict], category: str) -> str:
     """これまでの会話履歴を渡してClaudeからの返答を取得する。APIキー未設定時は案内メッセージを返す。"""
     api_key = _get_api_key()
@@ -919,46 +968,70 @@ def _call_claude(messages: list[dict], category: str) -> str:
         )
 
     client = anthropic.Anthropic(api_key=api_key)
-    conversation = list(messages)
 
-    for _ in range(30):  # ツール呼び出しの無限ループを防ぐための上限（見積書の明細入力は工程が多いため多めに確保）
-        # max_tokensは十分大きくし、タイムアウト防止のためストリーミングで取得する。
-        # 明細の多い案件では1回のやりとりの出力量が多く、既定の小さいmax_tokensだと
-        # 文章の途中でstop_reason="max_tokens"となって打ち切られ、ツール呼び出しに
-        # 辿り着けないまま無言で終わってしまうことがあったため（工程表の自動生成で
-        # 遭遇したのと同じ問題）。
-        with client.messages.stream(
-            model=MODEL_NAME,
-            max_tokens=32000,
-            system=_build_context_summary(category),
-            tools=SHEET_TOOLS + APP_DB_TOOLS,
-            messages=conversation,
-        ) as stream:
-            response = stream.get_final_message()
+    try:
+        conversation = _prepare_conversation_for_api(client, messages)
 
-        if response.stop_reason == "max_tokens":
-            return (
-                "回答が長くなりすぎたため、途中で終了しました。"
-                "工種を分けるなど、一度に頼む範囲を絞ってもう一度お試しください。"
-            )
-        if response.stop_reason != "tool_use":
-            return "".join(block.text for block in response.content if block.type == "text")
+        for _ in range(30):  # ツール呼び出しの無限ループを防ぐための上限（見積書の明細入力は工程が多いため多めに確保）
+            # max_tokensは十分大きくし（Claude Sonnet 5の上限は128,000）、タイムアウト
+            # 防止のためストリーミングで取得する。明細の多い案件では1回のやりとりの
+            # 出力量が多く、既定の小さいmax_tokensだと文章の途中でstop_reason="max_tokens"
+            # となって打ち切られ、ツール呼び出しに辿り着けないまま無言で終わってしまう
+            # ことがあったため（工程表の自動生成で遭遇したのと同じ問題）。
+            with client.messages.stream(
+                model=MODEL_NAME,
+                max_tokens=64000,
+                system=_build_context_summary(category),
+                tools=SHEET_TOOLS + APP_DB_TOOLS,
+                messages=conversation,
+            ) as stream:
+                response = stream.get_final_message()
 
-        conversation.append({"role": "assistant", "content": response.content})
-
-        tool_results = []
-        for block in response.content:
-            if block.type == "tool_use":
-                if block.name in APP_DB_TOOL_NAMES:
-                    result = _run_db_tool(block.name, block.input)
-                else:
-                    result = _run_sheet_tool(block.name, block.input, category)
-                tool_results.append(
-                    {"type": "tool_result", "tool_use_id": block.id, "content": result}
+            if response.stop_reason == "max_tokens":
+                return (
+                    "回答が長くなりすぎたため、途中で終了しました。"
+                    "工種を分けるなど、一度に頼む範囲を絞ってもう一度お試しください。"
                 )
-        conversation.append({"role": "user", "content": tool_results})
+            if response.stop_reason != "tool_use":
+                return "".join(block.text for block in response.content if block.type == "text")
 
-    return "処理が複雑になりすぎたため、完了できませんでした。もう一度お試しください。"
+            conversation.append({"role": "assistant", "content": response.content})
+
+            tool_results = []
+            for block in response.content:
+                if block.type == "tool_use":
+                    if block.name in APP_DB_TOOL_NAMES:
+                        result = _run_db_tool(block.name, block.input)
+                    else:
+                        result = _run_sheet_tool(block.name, block.input, category)
+                    tool_results.append(
+                        {"type": "tool_result", "tool_use_id": block.id, "content": result}
+                    )
+            conversation.append({"role": "user", "content": tool_results})
+
+        return "処理が複雑になりすぎたため、完了できませんでした。もう一度お試しください。"
+    except anthropic.RequestTooLargeError:
+        return (
+            "送信内容（添付ファイルや、これまでの会話のやり取り）が大きすぎたため、"
+            "送信できませんでした。画面右上の「新しい会話を始める」で会話をリセットしてから、"
+            "もう一度お試しください（それでも失敗する場合は、ファイルを分割するか、"
+            "サイズを小さくしてからお試しください）。"
+        )
+    except anthropic.RateLimitError:
+        return "アクセスが集中しているため、少し時間をおいてからもう一度お試しください。"
+    except anthropic.APITimeoutError:
+        return (
+            "応答に時間がかかりすぎたため、タイムアウトしました。"
+            "内容を分けて、もう一度お試しください。"
+        )
+    except anthropic.AuthenticationError:
+        return "AnthropicのAPIキーが正しくないようです。設定をご確認ください。"
+    except anthropic.APIConnectionError:
+        return "通信エラーが発生しました。インターネット接続をご確認のうえ、もう一度お試しください。"
+    except anthropic.AnthropicError as exc:
+        return f"Claudeとの通信でエラーが発生しました。もう一度お試しください。（詳細: {exc}）"
+    except Exception as exc:  # noqa: BLE001 — 予期しない失敗もチャット上にわかりやすく表示するため
+        return f"予期しないエラーが発生しました。もう一度お試しください。（詳細: {exc}）"
 
 
 def show_chat_toggle() -> None:
@@ -1109,9 +1182,20 @@ def show_chat_panel(category: str) -> None:
 
     with st.container(key="chat_panel"):
         with st.container(key="chat_panel_header"):
-            col_title, col_close = st.columns([2, 1])
+            col_title, col_new_chat, col_close = st.columns([2, 3, 1])
             with col_title:
                 st.subheader("チャット")
+            with col_new_chat:
+                if st.button(
+                    "新しい会話を始める",
+                    key="chat_new_conversation_button",
+                    width="stretch",
+                    help="会話の履歴（添付したファイルも含む）をリセットします。長い会話や大きな"
+                    "添付ファイルが続くと、応答が遅くなったり失敗しやすくなるため、"
+                    "話題や案件が変わったらここで新しい会話を始めることをおすすめします。",
+                ):
+                    st.session_state["chat_messages"] = []
+                    st.rerun()
             with col_close:
                 if st.button("閉じる", key="chat_close_button", width="stretch"):
                     st.session_state["chat_open"] = False
