@@ -31,6 +31,12 @@ google_auth.handle_login_redirect()
 show_header()
 st.title("会計・原価管理")
 
+if google_auth.is_logged_in():
+    # 定期請求のうち、請求日を迎えていてまだ請求書が作られていないものをここでも
+    # チェックする（「定期請求」ページを経由せずこちらを先に開いた場合に追いつくため）。
+    for _msg in billing_generator.check_and_generate_due_recurring_billings(google_auth.get_credentials()):
+        st.success(_msg)
+
 projects = [p for p in project_store.get_all_projects() if not p.get("archived")]
 project_options = {p["id"]: p["name"] for p in projects}
 
@@ -608,7 +614,13 @@ with tab3:
 
     st.divider()
     st.markdown("#### 請求一覧")
-    all_billings = [b for b in billing_store.get_all_billings() if b["project_id"] in project_options]
+    # project_idがNoneのものは定期請求から作られた請求（案件に紐付かない）なので、
+    # 案件に紐付くもの（project_options）と合わせて含める。
+    all_billings = [
+        b
+        for b in billing_store.get_all_billings()
+        if b["project_id"] is None or b["project_id"] in project_options
+    ]
     if not all_billings:
         st.caption("まだ請求データがありません。")
     else:
@@ -684,7 +696,13 @@ with tab5:
     st.subheader("収支ダッシュボード")
 
     all_costs = [c for c in cost_store.get_all_costs() if c["project_id"] in project_options]
-    all_billings = [b for b in billing_store.get_all_billings() if b["project_id"] in project_options]
+    # project_idがNoneのものは定期請求から作られた請求（案件に紐付かない）なので、
+    # 案件に紐付くもの（project_options）と合わせて含める。
+    all_billings = [
+        b
+        for b in billing_store.get_all_billings()
+        if b["project_id"] is None or b["project_id"] in project_options
+    ]
 
     total_revenue = 0
     project_summaries = []
@@ -703,6 +721,10 @@ with tab5:
                 "粗利率(%)": round(p_margin, 1),
             }
         )
+
+    # 定期請求から作られた請求（どの案件にも紐付かない）の金額も、売上合計に加える。
+    recurring_revenue = sum(b["amount"] for b in all_billings if b["project_id"] is None)
+    total_revenue += recurring_revenue
 
     total_cost = sum(c["amount_tax_included"] for c in all_costs)
     total_profit = total_revenue - total_cost

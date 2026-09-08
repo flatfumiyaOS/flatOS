@@ -82,6 +82,37 @@ def list_sheet_names(spreadsheet_id: str) -> list[str]:
     return [ws.title for ws in _get_spreadsheet(spreadsheet_id).worksheets()]
 
 
+def rename_worksheet(spreadsheet_id: str, sheet_name: str, new_name: str) -> None:
+    """指定したシートの名前を変更する。"""
+    worksheet = _get_spreadsheet(spreadsheet_id).worksheet(sheet_name)
+    worksheet.update_title(new_name)
+
+
+def add_worksheet(spreadsheet_id: str, title: str, rows: int, cols: int) -> None:
+    """スプレッドシートに、指定した行数・列数の新しい空のシートを追加する。"""
+    _get_spreadsheet(spreadsheet_id).add_worksheet(title=title, rows=rows, cols=cols)
+
+
+def duplicate_worksheet_into(
+    source_spreadsheet_id: str,
+    source_sheet_name: str,
+    destination_spreadsheet_id: str,
+    new_sheet_name: str,
+) -> None:
+    """source_spreadsheet_idのsource_sheet_nameシートを、destination_spreadsheet_id
+    （別のスプレッドシート）にシートごと複製し、new_sheet_nameという名前にする。
+
+    定期請求の合算請求書のように、複数の見積書スプレッドシートの内容を
+    1つのファイルにシートとしてまとめたい場合に使う。コピー元・コピー先の
+    両方に、この関数の呼び出し元（サービスアカウント）の編集権限が必要。
+    """
+    source_worksheet = _get_spreadsheet(source_spreadsheet_id).worksheet(source_sheet_name)
+    result = source_worksheet.copy_to(destination_spreadsheet_id)
+    destination_spreadsheet = _get_spreadsheet(destination_spreadsheet_id)
+    new_worksheet = destination_spreadsheet.get_worksheet_by_id(result["sheetId"])
+    new_worksheet.update_title(new_sheet_name)
+
+
 def read_cell(spreadsheet_id: str, sheet_name: str, cell: str) -> str | None:
     """指定したシートの指定したセル（例:"A1"）の値を読み取る。"""
     worksheet = _get_spreadsheet(spreadsheet_id).worksheet(sheet_name)
