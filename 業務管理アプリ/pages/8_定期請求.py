@@ -184,6 +184,33 @@ else:
                             r["id"], recurring_billing_store.STATUS_ACTIVE
                         )
                         st.rerun()
+                if st.button("削除する", key=f"delete_recurring_{r['id']}", width="stretch"):
+                    st.session_state["pending_delete_recurring_id"] = r["id"]
+
+            # 削除確認（誤操作防止のため、確認ボタンを別途表示）
+            if st.session_state.get("pending_delete_recurring_id") == r["id"]:
+                st.warning(
+                    f"「{r['customer_name']}」の定期請求（{schedule_label}）を本当に削除しますか？"
+                    "この操作は取り消せません（過去に作成した請求書自体は削除されません）。"
+                )
+                col_yes, col_no = st.columns(2)
+                with col_yes:
+                    if st.button(
+                        "はい、削除する",
+                        type="primary",
+                        key=f"confirm_delete_recurring_{r['id']}",
+                        width="stretch",
+                    ):
+                        recurring_billing_store.delete_recurring_billing(r["id"])
+                        del st.session_state["pending_delete_recurring_id"]
+                        st.success("削除しました。")
+                        st.rerun()
+                with col_no:
+                    if st.button(
+                        "キャンセル", key=f"cancel_delete_recurring_{r['id']}", width="stretch"
+                    ):
+                        del st.session_state["pending_delete_recurring_id"]
+                        st.rerun()
 
 show_chat_toggle()
 show_chat_panel(category="請求書")

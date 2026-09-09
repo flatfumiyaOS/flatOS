@@ -94,6 +94,16 @@ def set_status(recurring_billing_id: int, status: str) -> None:
     _save_all(records)
 
 
+def delete_recurring_billing(recurring_billing_id: int) -> None:
+    """定期請求の登録（ルール）を削除する。CLAUDE.mdの方針上、ユーザー本人の
+    明示的な許可を得たうえでのみ呼び出すこと。過去に生成した請求書
+    （billing_store側のデータ）は削除しない（会計上の記録として残す）。
+    """
+    records = _load_all()
+    remaining = [r for r in records if r["id"] != recurring_billing_id]
+    _save_all(remaining)
+
+
 def set_last_generated_period(recurring_billing_id: int, period_key: str) -> None:
     records = _load_all()
     for r in records:
