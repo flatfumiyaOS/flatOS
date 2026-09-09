@@ -257,15 +257,20 @@ with tab1:
                     "金額（税込）", min_value=0, step=1000, key="manual_cost_amount"
                 )
                 manual_content = st.text_input("内容（工種・購入内容など）", key="manual_cost_content")
-                col_manual_date, col_manual_due = st.columns(2)
-                with col_manual_date:
-                    manual_invoice_date = st.date_input(
-                        "請求日・購入日", value=datetime.date.today(), key="manual_cost_invoice_date"
-                    )
-                with col_manual_due:
-                    manual_due_date = st.date_input(
-                        "支払期限", value=datetime.date.today(), key="manual_cost_due_date"
-                    )
+                if is_estimate_stage:
+                    manual_invoice_date = None
+                    manual_due_date = None
+                    st.caption("見積原価は、まだ請求日・支払期限が確定していないため入力欄を省略しています。")
+                else:
+                    col_manual_date, col_manual_due = st.columns(2)
+                    with col_manual_date:
+                        manual_invoice_date = st.date_input(
+                            "請求日・購入日", value=datetime.date.today(), key="manual_cost_invoice_date"
+                        )
+                    with col_manual_due:
+                        manual_due_date = st.date_input(
+                            "支払期限", value=datetime.date.today(), key="manual_cost_due_date"
+                        )
 
                 if st.form_submit_button("原価を登録", type="primary"):
                     if manual_amount <= 0:
@@ -293,8 +298,8 @@ with tab1:
                             amount_tax_included=int(manual_amount),
                             amount_tax_excluded=int(manual_amount),
                             work_type=manual_content.strip(),
-                            invoice_date=manual_invoice_date.isoformat(),
-                            payment_month=manual_due_date.strftime("%Y-%m"),
+                            invoice_date=manual_invoice_date.isoformat() if manual_invoice_date else "",
+                            payment_month=manual_due_date.strftime("%Y-%m") if manual_due_date else "",
                             category=manual_category,
                             stage=cost_stage,
                         )
@@ -408,19 +413,24 @@ with tab1:
                 f"請求書の内容から「{_project_label(guessed_id)}」の可能性があると判断しました（要確認）。"
             )
 
-        col_date, col_month = st.columns(2)
-        with col_date:
-            invoice_date_value = st.date_input(
-                "購入日" if is_receipt else "請求日",
-                value=_parse_date(result.get("invoice_date", "")) or datetime.date.today(),
-                key="cost_invoice_date",
-            )
-        with col_month:
-            payment_month_value = st.text_input(
-                "支払月（YYYY-MM）",
-                value=invoice_date_value.strftime("%Y-%m"),
-                key="cost_payment_month",
-            )
+        if is_result_estimate:
+            invoice_date_value = None
+            payment_month_value = ""
+            st.caption("見積原価は、まだ請求日・支払月が確定していないため入力欄を省略しています。")
+        else:
+            col_date, col_month = st.columns(2)
+            with col_date:
+                invoice_date_value = st.date_input(
+                    "購入日" if is_receipt else "請求日",
+                    value=_parse_date(result.get("invoice_date", "")) or datetime.date.today(),
+                    key="cost_invoice_date",
+                )
+            with col_month:
+                payment_month_value = st.text_input(
+                    "支払月（YYYY-MM）",
+                    value=invoice_date_value.strftime("%Y-%m"),
+                    key="cost_payment_month",
+                )
 
         if st.button("登録", key="cost_register_button", type="primary"):
             if not vendor_name.strip():
@@ -435,8 +445,8 @@ with tab1:
                     amount_tax_included=int(amount_incl),
                     amount_tax_excluded=int(amount_excl),
                     work_type=work_type,
-                    invoice_date=invoice_date_value.isoformat(),
-                    payment_month=payment_month_value.strip(),
+                    invoice_date=invoice_date_value.isoformat() if invoice_date_value else "",
+                    payment_month=payment_month_value.strip() if payment_month_value else "",
                     file_bytes=st.session_state.get("cost_ocr_file_bytes"),
                     file_name=st.session_state.get("cost_ocr_file_name"),
                     category=category,
@@ -480,7 +490,14 @@ with tab1:
     if selected_cost_month == "すべて":
         all_costs = all_costs_unfiltered
     else:
-        all_costs = [c for c in all_costs_unfiltered if (c["invoice_date"] or "")[:7] == selected_cost_month]
+        # 見積原価は請求日を持たない（登録時に入力欄を省略している）ため、年月の
+        # 絞り込みに関わらず常に表示する（実績原価のみを年月で絞り込む）。
+        all_costs = [
+            c
+            for c in all_costs_unfiltered
+            if c.get("stage", cost_store.STAGE_ACTUAL) == cost_store.STAGE_ESTIMATE
+            or (c["invoice_date"] or "")[:7] == selected_cost_month
+        ]
 
     if all_costs:
         st.dataframe(
@@ -511,7 +528,7 @@ with tab1:
     else:
         cost_id_to_label = {
             c["id"]: (
-                f'{c["invoice_date"]} / {c["project_name"]} / '
+                f'{c["invoice_date"] or "（見積：日付なし）"} / {c["project_name"]} / '
                 f'{c["vendor_name"] or "（未選択）"} / ¥{c["amount_tax_included"]:,}'
             )
             for c in all_costs
@@ -524,6 +541,18 @@ with tab1:
         )
         edit_cost = next(c for c in all_costs if c["id"] == edit_cost_id)
         project_ids = list(project_options.keys())
+
+        # 段階の選択で、下のフォーム内に請求日・支払期限の入力欄を出すかどうかが
+        # 変わるため、フォームの外に出して選択後すぐに反映されるようにする
+        # （st.form内のウィジェットは送信するまで再実行されないため）。
+        edit_stage = st.selectbox(
+            "段階",
+            options=cost_store.STAGE_OPTIONS,
+            index=cost_store.STAGE_OPTIONS.index(edit_cost.get("stage", cost_store.STAGE_ACTUAL)),
+            help="実際の請求書が届いたら「実績」に切り替えてください。",
+            key="edit_cost_stage_select",
+        )
+        is_edit_estimate = edit_stage == cost_store.STAGE_ESTIMATE
 
         with st.form("edit_cost_form"):
             edit_project_id = st.selectbox(
@@ -539,13 +568,6 @@ with tab1:
                 index=0 if edit_cost.get("category", cost_store.CATEGORY_SUBCONTRACT) == cost_store.CATEGORY_SUBCONTRACT else 1,
                 key="edit_cost_category_select",
             )
-            edit_stage = st.selectbox(
-                "段階",
-                options=cost_store.STAGE_OPTIONS,
-                index=cost_store.STAGE_OPTIONS.index(edit_cost.get("stage", cost_store.STAGE_ACTUAL)),
-                help="実際の請求書が届いたら「実績」に切り替えてください。",
-                key="edit_cost_stage_select",
-            )
             edit_vendor_name = st.text_input(
                 "会社名・店舗名（空欄可）", value=edit_cost["vendor_name"], key="edit_cost_vendor"
             )
@@ -559,19 +581,24 @@ with tab1:
             edit_content = st.text_input(
                 "内容（工種・購入内容など）", value=edit_cost["work_type"], key="edit_cost_content"
             )
-            col_edit_date, col_edit_due = st.columns(2)
-            with col_edit_date:
-                edit_invoice_date = st.date_input(
-                    "請求日・購入日",
-                    value=_parse_date(edit_cost["invoice_date"]) or datetime.date.today(),
-                    key="edit_cost_invoice_date",
-                )
-            with col_edit_due:
-                edit_due_date = st.date_input(
-                    "支払期限",
-                    value=_parse_date(f'{edit_cost["payment_month"]}-01') or datetime.date.today(),
-                    key="edit_cost_due_date",
-                )
+            if is_edit_estimate:
+                edit_invoice_date = None
+                edit_due_date = None
+                st.caption("見積原価は、まだ請求日・支払期限が確定していないため入力欄を省略しています。")
+            else:
+                col_edit_date, col_edit_due = st.columns(2)
+                with col_edit_date:
+                    edit_invoice_date = st.date_input(
+                        "請求日・購入日",
+                        value=_parse_date(edit_cost["invoice_date"]) or datetime.date.today(),
+                        key="edit_cost_invoice_date",
+                    )
+                with col_edit_due:
+                    edit_due_date = st.date_input(
+                        "支払期限",
+                        value=_parse_date(f'{edit_cost["payment_month"]}-01') or datetime.date.today(),
+                        key="edit_cost_due_date",
+                    )
 
             if st.form_submit_button("更新する", type="primary"):
                 if edit_amount <= 0:
@@ -585,8 +612,8 @@ with tab1:
                         amount_tax_included=int(edit_amount),
                         amount_tax_excluded=int(edit_amount),
                         work_type=edit_content.strip(),
-                        invoice_date=edit_invoice_date.isoformat(),
-                        payment_month=edit_due_date.strftime("%Y-%m"),
+                        invoice_date=edit_invoice_date.isoformat() if edit_invoice_date else "",
+                        payment_month=edit_due_date.strftime("%Y-%m") if edit_due_date else "",
                         category=edit_category,
                         stage=edit_stage,
                     )
@@ -675,7 +702,6 @@ with tab2:
                         "業者名・店舗名": c["vendor_name"],
                         "工種・内容": c["work_type"],
                         "税込金額": _yen(c["amount_tax_included"]),
-                        "日付": c["invoice_date"],
                     }
                     for c in estimate_costs
                 ],
