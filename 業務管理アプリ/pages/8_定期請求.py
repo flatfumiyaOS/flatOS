@@ -47,19 +47,15 @@ with col_new:
         st.session_state["show_new_recurring_form"] = True
 
 if google_auth.is_logged_in():
-    if st.session_state.pop("_skip_recurring_billing_check", False):
-        # 直前に新しい定期請求を登録した直後の再描画では、生成チェックを1回だけ
-        # スキップする。同一顧客・同一請求日の定期請求を続けて複数登録する場合に、
-        # 1件目を登録した瞬間のチェックで先に単独請求書が作られてしまい、2件目と
-        # 合算できなくなる問題を防ぐため（すべて登録し終えてから、このページを
-        # 開き直したときに改めてチェックされる）。
-        pass
-    else:
-        generated_messages = billing_generator.check_and_generate_due_recurring_billings(
-            google_auth.get_credentials()
-        )
-        for msg in generated_messages:
-            st.success(msg)
+    # 登録されてから間もない（billing_generator.RECURRING_REGISTRATION_GRACE未満の）
+    # 定期請求がある顧客は、その顧客の生成をまるごと見送る仕組みになっている
+    # （同じ顧客の定期請求を続けて複数登録している途中で、片方だけ先に単独の
+    # 請求書が作られてしまうのを防ぐため）。
+    generated_messages = billing_generator.check_and_generate_due_recurring_billings(
+        google_auth.get_credentials()
+    )
+    for msg in generated_messages:
+        st.success(msg)
 else:
     st.caption(
         "Googleアカウントでログインすると、請求日を迎えた定期請求の請求書が自動で作成されます"
@@ -142,7 +138,6 @@ if st.session_state.get("show_new_recurring_form"):
                                 int(billing_month_input) if is_yearly else None,
                             )
                             st.session_state["show_new_recurring_form"] = False
-                            st.session_state["_skip_recurring_billing_check"] = True
                             st.success(f"「{customer_name}」の定期請求を登録しました。")
                             st.rerun()
 

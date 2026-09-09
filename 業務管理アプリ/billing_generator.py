@@ -204,6 +204,17 @@ def _create_combined_recurring_invoice(
     return new_id
 
 
+#  同一顧客の定期請求を続けて複数登録する場合、1件登録した直後に生成処理が
+# 先に走ってしまうと、まだ登録していない残りの分と合算できなくなる（アプリを
+# 開くたびに生成チェックが走る仕組み上、登録直後の再描画・次の登録画面を開く
+# 操作などいずれかのタイミングで必ず1回はチェックが走ってしまうため、特定の
+# 1回の描画だけをスキップする方式では防ぎきれない）。そのため、ある顧客の
+# 定期請求のうち、登録されてからまだ日が浅いもの（=REGISTRATION_GRACE未満）が
+# 1件でもあれば、その顧客については今回の生成をまるごと見送り、全員が
+# 「登録されてからある程度時間が経った」状態になってから、まとめて生成・合算する。
+RECURRING_REGISTRATION_GRACE = datetime.timedelta(minutes=15)
+
+
 def check_and_generate_due_recurring_billings(user_credentials: UserCredentials) -> list[str]:
     """有効な定期請求のうち、まだ生成されていない直近の請求期に達しているものをまとめて
     生成する。同一顧客・同一請求日の定期請求が複数あれば、1つの請求書（合算）にまとめる。
@@ -215,14 +226,23 @@ def check_and_generate_due_recurring_billings(user_credentials: UserCredentials)
     生成した内容の説明文リストを返す（呼び出し側でst.successするなど通知用に使う）。
     """
     today = datetime.date.today()
+    now = datetime.datetime.now()
     active_records = [
         r
         for r in recurring_billing_store.get_all_recurring_billings()
         if r["status"] == recurring_billing_store.STATUS_ACTIVE
     ]
 
+    customers_with_recent_registration: set[int] = set()
+    for record in active_records:
+        created_at = datetime.datetime.fromisoformat(record["created_at"])
+        if now - created_at < RECURRING_REGISTRATION_GRACE:
+            customers_with_recent_registration.add(record["customer_id"])
+
     due_items: list[tuple[dict, str, datetime.date]] = []
     for record in active_records:
+        if record["customer_id"] in customers_with_recent_registration:
+            continue
         result = recurring_billing_store.is_due(record, today)
         if result is not None:
             period_key, due_billing_date = result
