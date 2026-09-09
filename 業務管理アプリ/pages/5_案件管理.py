@@ -257,6 +257,19 @@ if view_mode == "list":
             )
         visible_projects = projects if show_archived else [p for p in projects if not p.get("archived")]
 
+        keyword = st.text_input("案件を検索（案件名・顧客名・物件名・現場住所など）")
+        if keyword.strip():
+            like = keyword.strip()
+            visible_projects = [
+                p
+                for p in visible_projects
+                if like in (p.get("name") or "")
+                or like in (p.get("customer_name") or "")
+                or like in (p.get("property_name") or "")
+                or like in (p.get("address") or "")
+                or like in (p.get("overview") or "")
+            ]
+
         status_filter = st.pills(
             "絞り込み",
             options=STATUS_FILTER_OPTIONS,

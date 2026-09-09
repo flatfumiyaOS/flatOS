@@ -259,10 +259,34 @@ else:
         if p.get("spreadsheet_id") and not p.get("archived")
     ]
     existing_estimate_projects.sort(key=lambda p: p.get("updated_at", ""), reverse=True)
+
+    estimate_search_keyword = st.text_input(
+        "見積書を検索（顧客名・案件名・物件名など）",
+        key="estimate_search_keyword",
+        placeholder="キーワードを入力すると、下の一覧が絞り込まれます",
+    )
+    if estimate_search_keyword.strip():
+        like = estimate_search_keyword.strip()
+        existing_estimate_projects = [
+            p
+            for p in existing_estimate_projects
+            if like in (p.get("customer_name") or "")
+            or like in (p.get("name") or "")
+            or like in (p.get("property_name") or "")
+        ]
+
     estimate_options = {
         p["id"]: f"{p.get('customer_name') or '顧客未設定'} / {p['name']}"
         for p in existing_estimate_projects
     }
+
+    # キーワードで絞り込んだ結果、以前選んでいた見積書が選択肢から無くなっている場合、
+    # ウィジェット生成前にリセットしないとエラーになる。
+    if (
+        "select_existing_estimate" in st.session_state
+        and st.session_state["select_existing_estimate"] not in estimate_options
+    ):
+        del st.session_state["select_existing_estimate"]
 
     with st.container(border=True):
         col_select, col_open = st.columns([3, 1])
@@ -278,7 +302,10 @@ else:
                 else None
             )
             if not estimate_options:
-                st.caption("まだ見積書が作成されていません。")
+                if estimate_search_keyword.strip():
+                    st.caption("該当する見積書が見つかりません。")
+                else:
+                    st.caption("まだ見積書が作成されていません。")
         with col_open:
             st.write("")
             if st.button(
