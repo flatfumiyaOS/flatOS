@@ -32,10 +32,16 @@ show_header()
 st.title("会計・原価管理")
 
 if google_auth.is_logged_in():
-    # 定期請求のうち、請求日を迎えていてまだ請求書が作られていないものをここでも
-    # チェックする（「定期請求」ページを経由せずこちらを先に開いた場合に追いつくため）。
-    for _msg in billing_generator.check_and_generate_due_recurring_billings(google_auth.get_credentials()):
-        st.success(_msg)
+    if st.session_state.pop("_skip_recurring_billing_check", False):
+        # 「定期請求」ページで新しい定期請求を登録した直後は、この画面に来ても
+        # チェックを1回だけスキップする（同一顧客・同一請求日の登録を続けて行っている
+        # 途中で、片方だけ先に単独請求書化されてしまうのを防ぐため）。
+        pass
+    else:
+        # 定期請求のうち、請求日を迎えていてまだ請求書が作られていないものをここでも
+        # チェックする（「定期請求」ページを経由せずこちらを先に開いた場合に追いつくため）。
+        for _msg in billing_generator.check_and_generate_due_recurring_billings(google_auth.get_credentials()):
+            st.success(_msg)
 
 projects = [p for p in project_store.get_all_projects() if not p.get("archived")]
 project_options = {p["id"]: p["name"] for p in projects}
