@@ -55,6 +55,11 @@ INVOICE_PROMPT = (
     "添付した協力会社からの請求書を読み取り、内容を抽出してください。"
     "金額は数字のみ（カンマ・円マークなし）で答えてください。"
 )
+ESTIMATE_PROMPT = (
+    "添付した協力会社からの見積書（工事費用の見積もり）を読み取り、内容を抽出してください。"
+    "amount_tax_included・amount_tax_excludedには、確定した請求金額ではなく見積金額を入れてください。"
+    "金額は数字のみ（カンマ・円マークなし）で答えてください。"
+)
 RECEIPT_PROMPT = (
     "添付した画像は、ホームセンターなどで購入した材料のレシートです。"
     "店舗名をvendor_nameに、購入した商品の内容を簡潔にまとめてwork_typeに、"
@@ -73,9 +78,10 @@ def _get_api_key() -> str | None:
 
 
 def extract_invoice_info(file_bytes: bytes, media_type: str, document_kind: str = "invoice") -> dict:
-    """請求書またはレシートのPDF・画像から、業者名（店舗名）・金額・内容・日付などを抽出して辞書で返す。
+    """請求書・見積書・レシートのPDF・画像から、業者名（店舗名）・金額・内容・日付などを抽出して辞書で返す。
 
-    document_kind: "invoice"（協力会社請求書）または "receipt"（購入レシート）。
+    document_kind: "invoice"（協力会社請求書）、"estimate"（協力会社見積書）、
+    "receipt"（購入レシート）のいずれか。
     """
     api_key = _get_api_key()
     if anthropic is None or not api_key:
@@ -93,7 +99,12 @@ def extract_invoice_info(file_bytes: bytes, media_type: str, document_kind: str 
             "source": {"type": "base64", "media_type": media_type, "data": data_b64},
         }
 
-    prompt = RECEIPT_PROMPT if document_kind == "receipt" else INVOICE_PROMPT
+    if document_kind == "receipt":
+        prompt = RECEIPT_PROMPT
+    elif document_kind == "estimate":
+        prompt = ESTIMATE_PROMPT
+    else:
+        prompt = INVOICE_PROMPT
 
     client = anthropic.Anthropic(api_key=api_key)
     # max_tokensは十分な余裕を持たせ、ストリーミングで取得する

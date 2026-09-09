@@ -86,6 +86,15 @@ def get_file_bytes(cost: dict) -> bytes | None:
 CATEGORY_SUBCONTRACT = "外注費"
 CATEGORY_MATERIAL = "材料費"
 
+# 原価の段階。見積段階の予定原価（協力会社の見積書や手入力の予定金額）と、
+# 工事開始後の実績原価（確定した請求書・レシート）を区別する。既存データ
+# （このフィールドを追加する前に登録されたもの）はキー自体が無いため、
+# 読み取り側は get(“stage”, STAGE_ACTUAL) で「実績」扱いにする
+# （これまで登録されていたのはすべて実績の請求書・レシートのため）。
+STAGE_ACTUAL = "実績"
+STAGE_ESTIMATE = "見積"
+STAGE_OPTIONS = [STAGE_ACTUAL, STAGE_ESTIMATE]
+
 
 def add_cost(
     project_id: int,
@@ -99,6 +108,7 @@ def add_cost(
     file_bytes: bytes | None = None,
     file_name: str | None = None,
     category: str = CATEGORY_SUBCONTRACT,
+    stage: str = STAGE_ACTUAL,
 ) -> dict:
     costs = _load_all()
     new_id = max((c["id"] for c in costs), default=0) + 1
@@ -118,6 +128,7 @@ def add_cost(
         "invoice_date": invoice_date,
         "payment_month": payment_month,
         "category": category,
+        "stage": stage,
         "paid": False,
         "file_path": file_path,
         "drive_file_id": drive_file_id,
@@ -140,6 +151,7 @@ def update_cost(
     invoice_date: str,
     payment_month: str,
     category: str,
+    stage: str = STAGE_ACTUAL,
 ) -> None:
     costs = _load_all()
     for c in costs:
@@ -154,6 +166,7 @@ def update_cost(
                 invoice_date=invoice_date,
                 payment_month=payment_month,
                 category=category,
+                stage=stage,
             )
             c["updated_at"] = _now()
             break
