@@ -108,6 +108,9 @@ def create_invoice_from_estimate(
 ) -> str:
     """案件の見積書スプレッドシートを複製し、請求書としての体裁に書き換える。
 
+    「御見積内訳書」シートを持たない、「御見積書」だけの簡易なスプレッドシートにも
+    対応する（その場合は御見積書側だけを請求書の体裁にする）。
+
     返り値は新しく作成した請求書スプレッドシートのID。
     """
     date_str = billing_date.strftime("%Y%m%d")
@@ -115,11 +118,13 @@ def create_invoice_from_estimate(
     new_id = sheets.copy_spreadsheet(source_spreadsheet_id, title, user_credentials)
 
     due_date = next_month_last_day(billing_date)
+    sheet_names = sheets.list_sheet_names(new_id)
 
     _apply_header_rules(new_id, SUMMARY_SHEET, "請　求　書", billing_date, due_date)
-    _apply_header_rules(new_id, DETAIL_SHEET, "請　求　内　訳　書", billing_date, due_date)
     _clear_notes_section(new_id, SUMMARY_SHEET)
-    _clear_notes_section(new_id, DETAIL_SHEET)
+    if DETAIL_SHEET in sheet_names:
+        _apply_header_rules(new_id, DETAIL_SHEET, "請　求　内　訳　書", billing_date, due_date)
+        _clear_notes_section(new_id, DETAIL_SHEET)
 
     return new_id
 
@@ -162,16 +167,22 @@ def _create_combined_recurring_invoice(
     first_record = items[0][0]
     new_id = sheets.copy_spreadsheet(first_record["base_spreadsheet_id"], title, user_credentials)
 
+    # 「御見積内訳書」を持たない、「御見積書」だけの簡易なスプレッドシートにも対応する
+    # （その場合は御見積書のシートだけをコピー・リネームする）。
+    first_sheet_names = sheets.list_sheet_names(new_id)
     sheets.rename_worksheet(new_id, SUMMARY_SHEET, f"個別1_{SUMMARY_SHEET}")
-    sheets.rename_worksheet(new_id, DETAIL_SHEET, f"個別1_{DETAIL_SHEET}")
+    if DETAIL_SHEET in first_sheet_names:
+        sheets.rename_worksheet(new_id, DETAIL_SHEET, f"個別1_{DETAIL_SHEET}")
 
     for i, (record, _period_key, _due) in enumerate(items[1:], start=2):
+        source_sheet_names = sheets.list_sheet_names(record["base_spreadsheet_id"])
         sheets.duplicate_worksheet_into(
             record["base_spreadsheet_id"], SUMMARY_SHEET, new_id, f"個別{i}_{SUMMARY_SHEET}"
         )
-        sheets.duplicate_worksheet_into(
-            record["base_spreadsheet_id"], DETAIL_SHEET, new_id, f"個別{i}_{DETAIL_SHEET}"
-        )
+        if DETAIL_SHEET in source_sheet_names:
+            sheets.duplicate_worksheet_into(
+                record["base_spreadsheet_id"], DETAIL_SHEET, new_id, f"個別{i}_{DETAIL_SHEET}"
+            )
 
     combined_sheet_name = "合算請求書"
     sheets.add_worksheet(new_id, combined_sheet_name, rows=10 + len(items), cols=6)

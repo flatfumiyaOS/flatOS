@@ -113,11 +113,11 @@ if st.session_state.get("show_new_recurring_form"):
                         sheet_names = []
                         st.error(f"スプレッドシートを読み込めませんでした。URLをご確認ください。（詳細: {exc}）")
                     else:
-                        if "御見積書" not in sheet_names or "御見積内訳書" not in sheet_names:
+                        if "御見積書" not in sheet_names:
                             st.error(
-                                "このスプレッドシートには「御見積書」「御見積内訳書」のシートが"
-                                "見つかりませんでした。見積書ページで作成したスプレッドシートのURLを"
-                                "指定してください。"
+                                "このスプレッドシートには「御見積書」のシートが見つかりませんでした。"
+                                "見積書ページで作成したスプレッドシートのURLを指定してください"
+                                "（「御見積内訳書」シートは無くても登録できます）。"
                             )
                         else:
                             selected_customer = next(
