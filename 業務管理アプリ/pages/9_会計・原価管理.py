@@ -586,6 +586,14 @@ with tab1:
         edit_cost = next(c for c in costs_for_selected_project if c["id"] == edit_cost_id)
         project_ids = list(project_options.keys())
 
+        # 訂正するデータの選択を切り替えたときに下のフォームの表示が古いデータのまま
+        # になるバグへの対処。st.text_input/number_input/date_inputは、keyが同じだと
+        # value引数を変えてもsession_state上の値は更新されるが、ブラウザ側の表示は
+        # 更新されない（selectboxと違い、指定したindexへの表示追従がされない）ため、
+        # 各ウィジェットのkeyに選択中のid（edit_cost_id）を含め、データを選び直す
+        # たびに新しいウィジェットとして作り直されるようにする。
+        edit_field_key_suffix = f"_{edit_cost_id}"
+
         # 段階の選択で、下のフォーム内に請求日・支払期限の入力欄を出すかどうかが
         # 変わるため、フォームの外に出して選択後すぐに反映されるようにする
         # （st.form内のウィジェットは送信するまで再実行されないため）。
@@ -594,7 +602,7 @@ with tab1:
             options=cost_store.STAGE_OPTIONS,
             index=cost_store.STAGE_OPTIONS.index(edit_cost.get("stage", cost_store.STAGE_ACTUAL)),
             help="実際の請求書が届いたら「実績」に切り替えてください。",
-            key="edit_cost_stage_select",
+            key=f"edit_cost_stage_select{edit_field_key_suffix}",
         )
         is_edit_estimate = edit_stage == cost_store.STAGE_ESTIMATE
 
@@ -604,26 +612,30 @@ with tab1:
                 options=project_ids,
                 index=project_ids.index(edit_cost["project_id"]) if edit_cost["project_id"] in project_ids else 0,
                 format_func=_project_label,
-                key="edit_cost_project_select",
+                key=f"edit_cost_project_select{edit_field_key_suffix}",
             )
             edit_category = st.selectbox(
                 "区分",
                 options=[cost_store.CATEGORY_SUBCONTRACT, cost_store.CATEGORY_MATERIAL],
                 index=0 if edit_cost.get("category", cost_store.CATEGORY_SUBCONTRACT) == cost_store.CATEGORY_SUBCONTRACT else 1,
-                key="edit_cost_category_select",
+                key=f"edit_cost_category_select{edit_field_key_suffix}",
             )
             edit_vendor_name = st.text_input(
-                "会社名・店舗名（空欄可）", value=edit_cost["vendor_name"], key="edit_cost_vendor"
+                "会社名・店舗名（空欄可）",
+                value=edit_cost["vendor_name"],
+                key=f"edit_cost_vendor{edit_field_key_suffix}",
             )
             edit_amount = st.number_input(
                 "金額（税込）",
                 min_value=0,
                 step=1000,
                 value=int(edit_cost["amount_tax_included"]),
-                key="edit_cost_amount",
+                key=f"edit_cost_amount{edit_field_key_suffix}",
             )
             edit_content = st.text_input(
-                "内容（工種・購入内容など）", value=edit_cost["work_type"], key="edit_cost_content"
+                "内容（工種・購入内容など）",
+                value=edit_cost["work_type"],
+                key=f"edit_cost_content{edit_field_key_suffix}",
             )
             if is_edit_estimate:
                 edit_invoice_date = None
@@ -635,13 +647,13 @@ with tab1:
                     edit_invoice_date = st.date_input(
                         "請求日・購入日",
                         value=_parse_date(edit_cost["invoice_date"]) or datetime.date.today(),
-                        key="edit_cost_invoice_date",
+                        key=f"edit_cost_invoice_date{edit_field_key_suffix}",
                     )
                 with col_edit_due:
                     edit_due_date = st.date_input(
                         "支払期限",
                         value=_parse_date(f'{edit_cost["payment_month"]}-01') or datetime.date.today(),
-                        key="edit_cost_due_date",
+                        key=f"edit_cost_due_date{edit_field_key_suffix}",
                     )
 
             if st.form_submit_button("更新する", type="primary"):
