@@ -158,6 +158,60 @@ def delete_rows(spreadsheet_id: str, sheet_name: str, start_row: int, end_row: i
     worksheet.delete_rows(start_row, end_row)
 
 
+def find_marker_row(
+    spreadsheet_id: str, sheet_name: str, marker: str, start_row: int, search_rows: int
+) -> int | None:
+    """指定したシートのA列を、start_rowからsearch_rows行ぶん上から順に探し、
+    marker文字列（例:「【諸経費】」）が最初に完全一致する行番号を返す。
+    見つからなければNoneを返す。
+    """
+    end_row = start_row + search_rows - 1
+    values = read_range(spreadsheet_id, sheet_name, f"A{start_row}:A{end_row}")
+    for i, row in enumerate(values):
+        if row and row[0] == marker:
+            return start_row + i
+    return None
+
+
+def compact_gap_above_marker(
+    spreadsheet_id: str,
+    sheet_name: str,
+    marker: str,
+    item_start_row: int,
+    search_rows: int = 400,
+) -> int:
+    """item_start_row以降でmarker文字列（例:「【諸経費】」）が現れる行を探し、その
+    直前に実際の内容が無い空白行が残っていれば、空白を1行だけ残してまとめて削除する
+    （marker行より下は、削除した分だけそのまま上に詰まる）。
+
+    見積書の明細をAIが書き終えた行数がテンプレート作成時の想定より少ないと、明細と
+    固定セクション（【諸経費】など）の間に大きな空白ができてしまう問題への対策。
+    削除した行数を返す（詰める必要が無ければ0）。
+    """
+    marker_row = find_marker_row(spreadsheet_id, sheet_name, marker, item_start_row, search_rows)
+    if marker_row is None:
+        return 0
+
+    values = read_range(spreadsheet_id, sheet_name, f"A{item_start_row}:F{marker_row - 1}")
+    last_content_offset = None
+    for i, row in enumerate(values):
+        if any(cell for cell in row):
+            last_content_offset = i
+    if last_content_offset is None:
+        return 0
+    last_content_row = item_start_row + last_content_offset
+
+    # last_content_rowの次の1行は区切りの空白として残し、その次からmarker_rowの
+    # 手前までを削除する。
+    delete_start = last_content_row + 2
+    delete_end = marker_row - 1
+    if delete_end < delete_start:
+        return 0
+
+    delete_rows(spreadsheet_id, sheet_name, delete_start, delete_end)
+    return delete_end - delete_start + 1
+
+
 def set_column_width(
     spreadsheet_id: str, sheet_name: str, start_col: int, end_col: int, width_px: int
 ) -> None:

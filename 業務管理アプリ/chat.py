@@ -31,6 +31,7 @@ from db import (
 )
 from sheets import (
     TEMPLATE_SPREADSHEET_ID,
+    compact_gap_above_marker,
     delete_rows,
     list_sheet_names,
     read_cell,
@@ -216,6 +217,20 @@ SHEET_TOOLS = [
             },
             "required": ["sheet_name", "start_row", "end_row", "height_px"],
         },
+    },
+    {
+        "name": "compact_estimate_detail_gap",
+        "description": (
+            "見積書の「御見積内訳書」シートで、明細を書き終えた最後の行から【諸経費】"
+            "（弊社直接施工等・諸経費・備考を含むそれ以降の固定ブロック）までの間に、"
+            "使われていない空白行が残っていれば、まとめて自動的に削除して詰める"
+            "（空白は区切りとして1行だけ残る）。明細の行数がテンプレートの想定より少ない"
+            "場合に発生する大きな空白を無くすためのツール。明細（御見積内訳書）を"
+            "一通り書き終えたら、他の仕上げ作業と合わせて必ずこれを実行する。"
+            "自分でread_sheet_rangeして空白行数を数えてdelete_sheet_rowsする必要はない"
+            "（このツールが正確に計算する）。"
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
     },
 ]
 
@@ -717,6 +732,12 @@ def _run_sheet_tool(name: str, tool_input: dict, category: str) -> str:
                 tool_input["height_px"],
             )
             return "行の高さを設定しました。"
+        if name == "compact_estimate_detail_gap":
+            # 32はpages/6_見積書.pyのESTIMATE_ITEM_START_ROWと同じ値（明細の開始行）。
+            deleted = compact_gap_above_marker(spreadsheet_id, "御見積内訳書", "【諸経費】", 32, 400)
+            if deleted:
+                return f"{deleted}行分の空白を削除し、【諸経費】以降を明細の直後に詰めました。"
+            return "空白は残っていなかったため、変更はありませんでした。"
         return f"不明なツールです: {name}"
     except Exception as exc:  # noqa: BLE001 — ツール結果としてエラー内容をClaudeに返すため
         return f"エラーが発生しました: {exc}"
