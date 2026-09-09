@@ -741,7 +741,7 @@ with tab3:
     else:
         for b in reversed(all_billings):
             with st.container(border=True):
-                col_info, col_status, col_open = st.columns([3, 1, 1])
+                col_info, col_status, col_open, col_delete = st.columns([3, 1, 1, 1])
                 with col_info:
                     ratio_label = f"{b['ratio_percent']}%" if b.get("ratio_percent") else "-"
                     st.write(f"**{b['project_name']}** ／ 請求割合 {ratio_label} ／ ¥{b['amount']:,}")
@@ -765,6 +765,35 @@ with tab3:
                         st.link_button(
                             "開く", sheets.spreadsheet_url(b["spreadsheet_id"]), width="stretch"
                         )
+                with col_delete:
+                    if st.button("削除する", key=f"delete_billing_{b['id']}", width="stretch"):
+                        st.session_state["pending_delete_billing_id"] = b["id"]
+
+                # 削除確認（誤操作防止のため、確認ボタンを別途表示）
+                if st.session_state.get("pending_delete_billing_id") == b["id"]:
+                    st.warning(
+                        f"「{b['project_name']}」（¥{b['amount']:,}）の請求データを本当に"
+                        "削除しますか？この操作は取り消せません"
+                        "（Googleドライブ上の請求書スプレッドシート自体は削除されません）。"
+                    )
+                    col_yes, col_no = st.columns(2)
+                    with col_yes:
+                        if st.button(
+                            "はい、削除する",
+                            type="primary",
+                            key=f"confirm_delete_billing_{b['id']}",
+                            width="stretch",
+                        ):
+                            billing_store.delete_billing(b["id"])
+                            del st.session_state["pending_delete_billing_id"]
+                            st.success("削除しました。")
+                            st.rerun()
+                    with col_no:
+                        if st.button(
+                            "キャンセル", key=f"cancel_delete_billing_{b['id']}", width="stretch"
+                        ):
+                            del st.session_state["pending_delete_billing_id"]
+                            st.rerun()
 
 with tab4:
     st.subheader("支払管理（業者・店舗別）")

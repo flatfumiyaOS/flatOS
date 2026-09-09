@@ -113,3 +113,13 @@ def delete_billings_for_project(project_id: int) -> None:
     billings = _load_all()
     remaining = [b for b in billings if b["project_id"] != project_id]
     _save_all(remaining)
+
+
+def delete_billing(billing_id: int) -> None:
+    """1件の請求データを一覧から削除する。CLAUDE.mdの方針上、ユーザー本人の
+    明示的な許可を得たうえでのみ呼び出すこと。Googleドライブ上の請求書
+    スプレッドシート自体は削除しない（一覧からの記録だけを外す）。
+    """
+    billings = _load_all()
+    remaining = [b for b in billings if b["id"] != billing_id]
+    _save_all(remaining)
