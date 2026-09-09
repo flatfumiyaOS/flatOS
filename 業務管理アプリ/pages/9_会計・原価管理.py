@@ -455,7 +455,33 @@ with tab1:
 
     st.divider()
     st.markdown("#### 登録済みの原価データ（請求書・見積書・レシート）")
-    all_costs = [c for c in cost_store.get_all_costs() if c["project_id"] in project_options]
+
+    all_costs_unfiltered = [c for c in cost_store.get_all_costs() if c["project_id"] in project_options]
+
+    # 「登録済みの原価データ」の一覧と、その下の「訂正する」の選択肢を、同じ
+    # 年月の絞り込みで統一する（以前は一覧が全期間、訂正欄だけ今月のみという
+    # 食い違いがあり、登録したはずのデータが訂正欄に出てこないという分かりにくさが
+    # あったため）。
+    available_months = sorted(
+        {(c["invoice_date"] or "")[:7] for c in all_costs_unfiltered if c.get("invoice_date")},
+        reverse=True,
+    )
+    month_filter_options = ["すべて"] + available_months
+    current_month = datetime.date.today().strftime("%Y-%m")
+    default_month_index = (
+        month_filter_options.index(current_month) if current_month in month_filter_options else 0
+    )
+    selected_cost_month = st.selectbox(
+        "表示する年月",
+        options=month_filter_options,
+        index=default_month_index,
+        key="cost_month_filter",
+    )
+    if selected_cost_month == "すべて":
+        all_costs = all_costs_unfiltered
+    else:
+        all_costs = [c for c in all_costs_unfiltered if (c["invoice_date"] or "")[:7] == selected_cost_month]
+
     if all_costs:
         st.dataframe(
             [
@@ -476,29 +502,27 @@ with tab1:
             hide_index=True,
         )
     else:
-        st.caption("まだ登録された原価データはありません。")
+        st.caption("該当する原価データはありません。")
 
     st.divider()
     st.markdown("#### 登録済みの原価データを訂正する")
-    current_month = datetime.date.today().strftime("%Y-%m")
-    this_month_costs = [c for c in all_costs if (c["invoice_date"] or "")[:7] == current_month]
-    if not this_month_costs:
-        st.caption("今月分の原価データはありません。")
+    if not all_costs:
+        st.caption("該当する原価データはありません。")
     else:
         cost_id_to_label = {
             c["id"]: (
                 f'{c["invoice_date"]} / {c["project_name"]} / '
                 f'{c["vendor_name"] or "（未選択）"} / ¥{c["amount_tax_included"]:,}'
             )
-            for c in this_month_costs
+            for c in all_costs
         }
         edit_cost_id = st.selectbox(
-            "訂正する原価データを選択（今月分のみ表示）",
+            "訂正する原価データを選択",
             options=list(cost_id_to_label.keys()),
             format_func=lambda x: cost_id_to_label[x],
             key="edit_cost_select",
         )
-        edit_cost = next(c for c in this_month_costs if c["id"] == edit_cost_id)
+        edit_cost = next(c for c in all_costs if c["id"] == edit_cost_id)
         project_ids = list(project_options.keys())
 
         with st.form("edit_cost_form"):
