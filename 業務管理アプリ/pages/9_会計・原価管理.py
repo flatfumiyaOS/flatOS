@@ -52,6 +52,23 @@ def _yen(amount: int) -> str:
     return f"{amount:,}"
 
 
+def _comma_amount_input(label: str, key: str, help: str | None = None) -> int:
+    """手入力の金額欄。入力を確定する（Enterまたはフォーカスを外す）たびに桁区切り
+    （例: 1000 -> 1,000）へ自動で整形し直す。st.number_inputは桁区切り表示に
+    対応していないため、st.text_input+on_changeで代用する。st.form内では
+    on_changeが送信時までまとめて実行され、画面上は整形が反映されないため、
+    このウィジェットはformの外に置いて使うこと。
+    """
+
+    def _reformat() -> None:
+        digits = "".join(ch for ch in st.session_state.get(key, "") if ch.isdigit())
+        st.session_state[key] = f"{int(digits):,}" if digits else ""
+
+    st.text_input(label, key=key, on_change=_reformat, help=help, placeholder="0")
+    digits = "".join(ch for ch in st.session_state.get(key, "") if ch.isdigit())
+    return int(digits) if digits else 0
+
+
 def _parse_date(value: str) -> datetime.date | None:
     if not value:
         return None
@@ -224,6 +241,11 @@ with tab1:
         if not projects:
             st.info("先に「案件管理」で案件を登録してください。")
         else:
+            # 金額欄はカンマ区切り表示を自動で反映させるため、st.form の外に置く
+            # （st.form内のウィジェットはフォーム送信までon_changeが実行されず、
+            # 入力中に整形結果が画面に反映されないため）。
+            manual_amount = _comma_amount_input("金額（税込）", key="manual_cost_amount_display")
+
             with st.form("manual_cost_form", clear_on_submit=True):
                 st.caption(f"原価の段階: {cost_stage_label}（上の「原価の段階」の選択が適用されます）")
                 manual_project_id = st.selectbox(
@@ -253,9 +275,6 @@ with tab1:
                         value=True,
                         key="manual_cost_vendor_save_new",
                     )
-                manual_amount = st.number_input(
-                    "金額（税込）", min_value=0, step=1000, key="manual_cost_amount"
-                )
                 manual_content = st.text_input("内容（工種・購入内容など）", key="manual_cost_content")
                 if is_estimate_stage:
                     manual_invoice_date = None
@@ -304,6 +323,7 @@ with tab1:
                             stage=cost_stage,
                         )
                         st.success("原価データとして登録しました。")
+                        st.session_state.pop("manual_cost_amount_display", None)
                         st.rerun()
 
     st.divider()
