@@ -13,6 +13,7 @@ import streamlit as st
 
 import auth_gate
 import google_auth
+import project_store
 import schedule_generator
 import schedule_store
 import sheets
@@ -112,7 +113,38 @@ else:
             customer_name_selection = st.selectbox(
                 "顧客名", options=customer_names, key="schedule_customer_name"
             )
-            project_name = st.text_input("案件名", key="schedule_project_name")
+
+            # 顧客名に応じて、その顧客の既存案件（非表示にした案件を除く）から
+            # 案件名を選べるようにする（工程表は案件として登録している場合しか
+            # 使わないため、自由入力ではなく既存案件からの選択にする）。
+            customer_projects = (
+                [
+                    p
+                    for p in project_store.get_all_projects()
+                    if p.get("customer_name") == customer_name_selection and not p.get("archived")
+                ]
+                if customer_name_selection != "（選択してください）"
+                else []
+            )
+            project_name_options = ["（選択してください）"] + [p["name"] for p in customer_projects]
+
+            # 顧客を切り替えて案件の選択肢が変わり、以前選んでいた案件名が選択肢に
+            # 無くなっている場合、ウィジェット生成前にリセットしないとエラーになる。
+            if (
+                "schedule_project_name" in st.session_state
+                and st.session_state["schedule_project_name"] not in project_name_options
+            ):
+                del st.session_state["schedule_project_name"]
+
+            if customer_name_selection != "（選択してください）" and not customer_projects:
+                st.info(
+                    "この顧客に登録されている案件がありません。"
+                    "先に「案件管理」で案件を登録してください。"
+                )
+
+            project_name = st.selectbox(
+                "案件名", options=project_name_options, key="schedule_project_name"
+            )
 
             uploaded_drawing = st.file_uploader(
                 "図面・仕様書を添付（PDF・画像）",
@@ -145,8 +177,8 @@ else:
             if create_clicked:
                 if customer_name_selection == "（選択してください）":
                     st.error("顧客名を選択してください。")
-                elif not project_name.strip():
-                    st.error("案件名を入力してください。")
+                elif project_name == "（選択してください）":
+                    st.error("案件名を選択してください。")
                 elif uploaded_drawing is None:
                     st.error("図面・仕様書を添付してください。")
                 else:
