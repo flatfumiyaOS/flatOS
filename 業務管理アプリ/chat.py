@@ -31,6 +31,7 @@ from db import (
 )
 from sheets import (
     TEMPLATE_SPREADSHEET_ID,
+    add_estimate_interim_total,
     compact_gap_above_marker,
     delete_rows,
     list_sheet_names,
@@ -229,6 +230,24 @@ SHEET_TOOLS = [
             "一通り書き終えたら、他の仕上げ作業と合わせて必ずこれを実行する。"
             "自分でread_sheet_rangeして空白行数を数えてdelete_sheet_rowsする必要はない"
             "（このツールが正確に計算する）。"
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "add_estimate_interim_total",
+        "description": (
+            "見積書の「御見積内訳書」シートの、【諸経費】の小計行の直後に「中計」行を"
+            "1行挿入し、そこまでの各工種・弊社直接施工等・諸経費それぞれの小計をすべて"
+            "合算した金額を書き込む。続く「出精値引き」行は、中計の端数（千円未満の部分）"
+            "を切り捨てるマイナス金額の数式に自動で書き換える。「御見積書」側の"
+            "出精値引き（49行目）も、この値を参照する数式にして2つのシートの金額を"
+            "一致させる。明細（御見積内訳書）を一通り書き終え、compact_estimate_detail_gap"
+            "で空白を詰めた後に、その仕上げの一環として実行する。自分で各工種の小計の"
+            "行番号を数えて合計式を組み立てる必要はない（このツールが正確に集計する）。"
+            "この処理はまだ「中計」行が挿入されていない見積書に対して1回だけ実行すること"
+            "（既に「中計」行がある見積書に対してもう一度実行すると、行が二重に挿入されて"
+            "しまうため、事前にread_sheet_rangeで【諸経費】付近を確認し、まだ「中計」が"
+            "無いことを確かめてから使う）。"
         ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
@@ -738,6 +757,16 @@ def _run_sheet_tool(name: str, tool_input: dict, category: str) -> str:
             if deleted:
                 return f"{deleted}行分の空白を削除し、【諸経費】以降を明細の直後に詰めました。"
             return "空白は残っていなかったため、変更はありませんでした。"
+        if name == "add_estimate_interim_total":
+            result = add_estimate_interim_total(
+                spreadsheet_id, "御見積内訳書", "御見積書", "【諸経費】", 32, 1000
+            )
+            summed = len(result["subtotal_rows_summed"])
+            return (
+                f"{result['interim_row']}行目に「中計」を挿入し、{summed}件の小計を合算しました。"
+                f"出精値引き（{result['discount_row']}行目）を千円未満切り捨ての数式に更新し、"
+                "御見積書の出精値引きもこの値を参照するようにしました。"
+            )
         return f"不明なツールです: {name}"
     except Exception as exc:  # noqa: BLE001 — ツール結果としてエラー内容をClaudeに返すため
         return f"エラーが発生しました: {exc}"

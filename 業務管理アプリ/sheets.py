@@ -158,6 +158,14 @@ def delete_rows(spreadsheet_id: str, sheet_name: str, start_row: int, end_row: i
     worksheet.delete_rows(start_row, end_row)
 
 
+def insert_rows(spreadsheet_id: str, sheet_name: str, row_index: int, num_rows: int = 1) -> None:
+    """指定した行位置（1始まり）に空白の行をnum_rows行挿入する。row_index以降の
+    既存の行は、その分だけ下にずれる（Googleスプレッドシート側で、ずれた行を
+    参照する数式は自動的に調整される）。"""
+    worksheet = _get_spreadsheet(spreadsheet_id).worksheet(sheet_name)
+    worksheet.insert_rows([[] for _ in range(num_rows)], row_index)
+
+
 def find_marker_row(
     spreadsheet_id: str, sheet_name: str, marker: str, start_row: int, search_rows: int
 ) -> int | None:
@@ -210,6 +218,82 @@ def compact_gap_above_marker(
 
     delete_rows(spreadsheet_id, sheet_name, delete_start, delete_end)
     return delete_end - delete_start + 1
+
+
+def add_estimate_interim_total(
+    spreadsheet_id: str,
+    detail_sheet_name: str,
+    summary_sheet_name: str,
+    marker: str,
+    item_start_row: int,
+    rounding_unit: int,
+    search_rows: int = 400,
+) -> dict:
+    """御見積内訳書の【諸経費】の小計行の直後に「中計」行を挿入し、そこまでの
+    各工種・弊社直接施工等・諸経費それぞれの小計を合算した金額を書き込む。
+    続く「出精値引き」行は、中計の端数（rounding_unit未満の部分）を切り捨てる
+    マイナス金額の数式に書き換える。御見積書側の「出精値引き」（固定49行目・F列）も、
+    この値をそのまま参照する数式にして、2つのシートの金額がずれないようにする。
+
+    戻り値: {"interim_row": 中計を書き込んだ行番号, "discount_row": 出精値引きの
+    行番号（挿入後）, "subtotal_rows_summed": 合算に使った小計セルの行番号一覧}。
+    """
+    marker_row = find_marker_row(spreadsheet_id, detail_sheet_name, marker, item_start_row, search_rows)
+    if marker_row is None:
+        raise ValueError(f"{marker} が見つかりませんでした。")
+
+    # 諸経費自身の小計行（marker_rowより後で、最初にE列が「小計」の行）を探す。
+    after_marker = read_range(
+        spreadsheet_id, detail_sheet_name, f"A{marker_row + 1}:F{marker_row + search_rows}"
+    )
+    zei_kei_subtotal_row = None
+    for i, row in enumerate(after_marker):
+        e = row[4] if len(row) > 4 else ""
+        if e == "小計":
+            zei_kei_subtotal_row = marker_row + 1 + i
+            break
+    if zei_kei_subtotal_row is None:
+        raise ValueError("諸経費の小計行が見つかりませんでした。")
+
+    # item_start_rowから諸経費の小計行までの間で、E列が「小計」の行
+    # （各工種・弊社直接施工等・諸経費それぞれの小計）をすべて集める。
+    all_values = read_range(
+        spreadsheet_id, detail_sheet_name, f"A{item_start_row}:F{zei_kei_subtotal_row}"
+    )
+    subtotal_rows = []
+    for i, row in enumerate(all_values):
+        e = row[4] if len(row) > 4 else ""
+        if e == "小計":
+            subtotal_rows.append(item_start_row + i)
+    if not subtotal_rows:
+        raise ValueError("合算対象の小計行が見つかりませんでした。")
+
+    # 諸経費の小計行の直後に1行挿入する（出精値引きなど、それ以降の行は自動的に1行下にずれる）。
+    interim_row = zei_kei_subtotal_row + 1
+    insert_rows(spreadsheet_id, detail_sheet_name, interim_row, 1)
+
+    interim_formula = "=" + "+".join(f"F{r}" for r in subtotal_rows)
+    write_cells(
+        spreadsheet_id, detail_sheet_name, {f"E{interim_row}": "中計", f"F{interim_row}": interim_formula}
+    )
+
+    discount_row = interim_row + 1
+    write_cells(
+        spreadsheet_id,
+        detail_sheet_name,
+        {
+            f"E{discount_row}": f"=-MOD(F{interim_row},{rounding_unit})",
+            f"F{discount_row}": f"=C{discount_row}*E{discount_row}",
+        },
+    )
+
+    write_cell(spreadsheet_id, summary_sheet_name, "F49", f"={detail_sheet_name}!E{discount_row}")
+
+    return {
+        "interim_row": interim_row,
+        "discount_row": discount_row,
+        "subtotal_rows_summed": subtotal_rows,
+    }
 
 
 def set_column_width(
