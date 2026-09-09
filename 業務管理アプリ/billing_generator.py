@@ -252,11 +252,29 @@ def check_and_generate_due_recurring_billings(user_credentials: UserCredentials)
     for item in due_items:
         groups.setdefault(item[0]["customer_id"], []).append(item)
 
+    all_billings = billing_store.get_all_billings()
+
     messages: list[str] = []
     for items in groups.values():
         customer_name = items[0][0]["customer_name"]
         billing_date = max(item[2] for item in items)
         due_date = next_month_last_day(billing_date)
+
+        # 二重生成の防止: recurring_billing_storeのlast_generated_periodだけを
+        # 頼りにすると、Googleドライブのバックアップから復元されるタイミングの
+        # ずれなどで更新が反映され損ね、同じ請求が2回作られてしまうことがある。
+        # 実際に記録されたbilling_store側のデータ（この請求日・この定期請求群を
+        # 含む請求が既に無いか）を必ず確認してから作成する。
+        item_ids = {record["id"] for record, _, _ in items}
+        already_billed = any(
+            b.get("billing_date") == billing_date.isoformat()
+            and item_ids & set(b.get("recurring_billing_ids") or [])
+            for b in all_billings
+        )
+        if already_billed:
+            for record, period_key, _ in items:
+                recurring_billing_store.set_last_generated_period(record["id"], period_key)
+            continue
 
         totals = [read_estimate_total(record["base_spreadsheet_id"]) or 0 for record, _, _ in items]
 
