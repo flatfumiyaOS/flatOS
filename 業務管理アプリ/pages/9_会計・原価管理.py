@@ -526,20 +526,44 @@ with tab1:
     if not all_costs:
         st.caption("該当する原価データはありません。")
     else:
+        # 案件名が長いと選択肢の中で業者名まで見えず区別しづらいため、案件を選ぶ欄と、
+        # その案件内の原価データを選ぶ欄に分ける。案件の選択肢は、上の「表示する年月」で
+        # 絞り込んだ範囲（all_costs）に実際に含まれる案件のみとする。
+        edit_project_choice_ids = sorted(
+            {c["project_id"] for c in all_costs}, key=lambda pid: _project_label(pid)
+        )
+        if (
+            "edit_cost_project_filter" in st.session_state
+            and st.session_state["edit_cost_project_filter"] not in edit_project_choice_ids
+        ):
+            del st.session_state["edit_cost_project_filter"]
+        edit_project_filter_id = st.selectbox(
+            "案件を選択",
+            options=edit_project_choice_ids,
+            format_func=_project_label,
+            key="edit_cost_project_filter",
+        )
+        costs_for_selected_project = [c for c in all_costs if c["project_id"] == edit_project_filter_id]
+
         cost_id_to_label = {
             c["id"]: (
-                f'{c["invoice_date"] or "（見積：日付なし）"} / {c["project_name"]} / '
+                f'{c["invoice_date"] or "（見積：日付なし）"} / '
                 f'{c["vendor_name"] or "（未選択）"} / ¥{c["amount_tax_included"]:,}'
             )
-            for c in all_costs
+            for c in costs_for_selected_project
         }
+        if (
+            "edit_cost_select" in st.session_state
+            and st.session_state["edit_cost_select"] not in cost_id_to_label
+        ):
+            del st.session_state["edit_cost_select"]
         edit_cost_id = st.selectbox(
             "訂正する原価データを選択",
             options=list(cost_id_to_label.keys()),
             format_func=lambda x: cost_id_to_label[x],
             key="edit_cost_select",
         )
-        edit_cost = next(c for c in all_costs if c["id"] == edit_cost_id)
+        edit_cost = next(c for c in costs_for_selected_project if c["id"] == edit_cost_id)
         project_ids = list(project_options.keys())
 
         # 段階の選択で、下のフォーム内に請求日・支払期限の入力欄を出すかどうかが
