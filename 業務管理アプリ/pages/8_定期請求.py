@@ -15,6 +15,7 @@ import streamlit as st
 
 import auth_gate
 import billing_generator
+import billing_store
 import google_auth
 import recurring_billing_store
 import sheets
@@ -151,9 +152,15 @@ else:
                 else:
                     schedule_label = f"毎月{r['billing_day']}日"
                 st.write(f"**{r['customer_name']}** ／ {schedule_label} ／ {r['status']}")
-                st.link_button(
-                    "ベースの見積書を開く", sheets.spreadsheet_url(r["base_spreadsheet_id"])
-                )
+                latest_invoices = billing_store.get_billings_for_recurring_billing(r["id"])
+                if latest_invoices and latest_invoices[0].get("spreadsheet_id"):
+                    latest_invoice = latest_invoices[0]
+                    st.link_button(
+                        f"請求書を開く（{latest_invoice['billing_date']}分）",
+                        sheets.spreadsheet_url(latest_invoice["spreadsheet_id"]),
+                    )
+                else:
+                    st.caption("まだ請求書は作成されていません（請求日を迎えると自動作成されます）。")
             with col_action:
                 st.write("")
                 if r["status"] == recurring_billing_store.STATUS_ACTIVE:

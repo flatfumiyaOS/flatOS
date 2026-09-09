@@ -58,6 +58,7 @@ def add_billing(
     billing_date: str,
     due_date: str,
     spreadsheet_id: str | None,
+    recurring_billing_ids: list[int] | None = None,
 ) -> dict:
     billings = _load_all()
     new_id = max((b["id"] for b in billings), default=0) + 1
@@ -73,6 +74,10 @@ def add_billing(
         "billing_date": billing_date,
         "due_date": due_date,
         "spreadsheet_id": spreadsheet_id,
+        # この請求が定期請求（recurring_billing_store）から作られた場合、その
+        # 元になった定期請求のid一覧（合算請求なら複数）。案件に紐づく通常の
+        # 請求ではNoneのまま。
+        "recurring_billing_ids": recurring_billing_ids,
         "status": STATUS_UNPAID,
         "created_at": now,
         "updated_at": now,
@@ -80,6 +85,17 @@ def add_billing(
     billings.append(billing)
     _save_all(billings)
     return billing
+
+
+def get_billings_for_recurring_billing(recurring_billing_id: int) -> list[dict]:
+    """指定した定期請求から作られた請求（合算請求で他の定期請求と一緒に作られたものも
+    含む）を、請求日の新しい順に返す。"""
+    matches = [
+        b
+        for b in _load_all()
+        if recurring_billing_id in (b.get("recurring_billing_ids") or [])
+    ]
+    return sorted(matches, key=lambda b: b.get("billing_date", ""), reverse=True)
 
 
 def set_status(billing_id: int, status: str) -> None:

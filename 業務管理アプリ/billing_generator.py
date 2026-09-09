@@ -267,6 +267,7 @@ def check_and_generate_due_recurring_billings(user_credentials: UserCredentials)
             billing_date=billing_date.isoformat(),
             due_date=due_date.isoformat(),
             spreadsheet_id=new_id,
+            recurring_billing_ids=[record["id"] for record, _, _ in items],
         )
         for record, period_key, _ in items:
             recurring_billing_store.set_last_generated_period(record["id"], period_key)
