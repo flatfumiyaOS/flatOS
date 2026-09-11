@@ -21,7 +21,7 @@ import project_store
 import property_store
 import sheets
 from chat import show_chat_panel, show_chat_toggle
-from db import get_all_customers
+from db import get_all_customers, get_all_vendors
 from layout import APP_ICON_PATH, show_header
 
 PHASES = ["現地調査", "解体", "隠蔽部(電気・水道・ガス)", "木工事", "仕上げ"]
@@ -510,8 +510,8 @@ elif view_mode == "detail":
     if project.get("archived"):
         st.warning("この案件は非表示に設定されています（案件一覧・会計画面には表示されません）。")
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["① 基本情報", "② 各種資料", "③ 工程表", "④ 現場写真", "⑤ 見積連携"]
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+        ["① 基本情報", "② 各種資料", "③ 工程表", "④ 現場写真", "⑤ 見積連携", "⑥ 参加業者"]
     )
 
     with tab1:
@@ -846,6 +846,56 @@ elif view_mode == "detail":
                     st.rerun()
                 else:
                     st.error("URLまたはIDを入力してください。")
+
+    with tab6:
+        st.markdown("##### 登録済みの参加業者")
+        participating_vendors = project.get("participating_vendors", [])
+        if participating_vendors:
+            for entry in participating_vendors:
+                with st.container(border=True):
+                    col_info, col_delete = st.columns([4, 1])
+                    with col_info:
+                        st.write(f"**{entry['vendor_name']}**")
+                        if entry.get("note"):
+                            st.caption(entry["note"])
+                    with col_delete:
+                        if st.button(
+                            "削除",
+                            key=f"remove_participating_vendor_{entry['id']}",
+                            width="stretch",
+                        ):
+                            project_store.remove_participating_vendor(selected_id, entry["id"])
+                            st.success("削除しました。")
+                            st.rerun()
+        else:
+            st.caption("まだ参加業者が登録されていません。")
+
+        st.divider()
+        st.markdown("##### 参加業者を追加する")
+        vendors = get_all_vendors()
+        if not vendors:
+            st.info("先に「協力会社」で業者を登録してください。")
+        else:
+            with st.form("add_participating_vendor_form", clear_on_submit=True):
+                vendor_names = [v["name"] for v in vendors]
+                selected_vendor_name = st.selectbox(
+                    "協力業者", options=vendor_names, key="participating_vendor_select"
+                )
+                participating_note = st.text_area(
+                    "備考（担当工事・担当場所など）", key="participating_vendor_note"
+                )
+                if st.form_submit_button("追加する", type="primary"):
+                    selected_vendor = next(
+                        v for v in vendors if v["name"] == selected_vendor_name
+                    )
+                    project_store.add_participating_vendor(
+                        selected_id,
+                        selected_vendor["id"],
+                        selected_vendor_name,
+                        participating_note.strip(),
+                    )
+                    st.success("追加しました。")
+                    st.rerun()
 
 # チャットのトグル・パネルは、ページ固有のウィジェット（一覧のフィルターや詳細の
 # タブなど）をすべて生成し終えたあとに呼び出す。先に呼び出すと、チャットの開閉

@@ -103,6 +103,7 @@ def create_project(name: str) -> dict:
         "property_name": "",
         "documents": [],
         "photos": [],
+        "participating_vendors": [],
         "cover_photo": None,
         "spreadsheet_id": None,
         "schedule_spreadsheet_id": None,
@@ -371,6 +372,43 @@ def add_photo(project_id: int, filename: str, file_bytes: bytes, phase: str) -> 
                     "uploaded_at": _now(),
                 }
             )
+            p["updated_at"] = _now()
+            break
+    _save_all(projects)
+
+
+def add_participating_vendor(
+    project_id: int, vendor_id: int | None, vendor_name: str, note: str
+) -> None:
+    """案件に参加する協力業者を追加する。同じ業者でも、担当工事・担当場所が違えば
+    備考を分けて複数回登録してよい。"""
+    projects = _load_all()
+    for p in projects:
+        if p["id"] == project_id:
+            entries = p.setdefault("participating_vendors", [])
+            new_entry_id = max((e["id"] for e in entries), default=0) + 1
+            entries.append(
+                {
+                    "id": new_entry_id,
+                    "vendor_id": vendor_id,
+                    "vendor_name": vendor_name,
+                    "note": note,
+                    "added_at": _now(),
+                }
+            )
+            p["updated_at"] = _now()
+            break
+    _save_all(projects)
+
+
+def remove_participating_vendor(project_id: int, entry_id: int) -> None:
+    """案件から参加業者の登録を1件削除する（協力会社データベース側の業者は削除しない）。"""
+    projects = _load_all()
+    for p in projects:
+        if p["id"] == project_id:
+            p["participating_vendors"] = [
+                e for e in p.get("participating_vendors", []) if e["id"] != entry_id
+            ]
             p["updated_at"] = _now()
             break
     _save_all(projects)
