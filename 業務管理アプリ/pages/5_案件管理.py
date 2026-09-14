@@ -21,7 +21,7 @@ import project_store
 import property_store
 import sheets
 from chat import show_chat_panel, show_chat_toggle
-from db import get_all_customers, get_all_vendors
+from db import get_all_customers, get_all_vendors, get_customer_contacts_for_customer
 from layout import APP_ICON_PATH, show_header
 
 PHASES = ["現地調査", "解体", "隠蔽部(電気・水道・ガス)", "木工事", "仕上げ"]
@@ -391,6 +391,38 @@ elif view_mode == "create":
             if linked_property.get("staff") in project_store.STAFF_OPTIONS:
                 st.session_state["new_project_staff"] = linked_property["staff"]
 
+    # 顧客担当者の選択肢は選んだ顧客によって変わるため、物件と同様にフォームの外に出す。
+    NO_CONTACT_CHOICE = "（選択しない）"
+    customer_contacts = (
+        get_customer_contacts_for_customer(selected_customer["id"])
+        if selected_customer is not None
+        else []
+    )
+    contact_option_ids = [NO_CONTACT_CHOICE] + [c["id"] for c in customer_contacts]
+
+    # 顧客を切り替えたことで担当者の選択肢が変わり、以前選んでいた担当者idが選択肢に
+    # 無くなっている場合、ウィジェット生成前にリセットしないとエラーになる。
+    if (
+        "new_project_contact_choice" in st.session_state
+        and st.session_state["new_project_contact_choice"] not in contact_option_ids
+    ):
+        del st.session_state["new_project_contact_choice"]
+
+    contact_id_choice = st.selectbox(
+        "顧客担当者（任意）",
+        options=contact_option_ids,
+        format_func=lambda x: (
+            x if x == NO_CONTACT_CHOICE else next(c["name"] for c in customer_contacts if c["id"] == x)
+        ),
+        key="new_project_contact_choice",
+        help="顧客担当者データベースに登録済みの、この顧客側の窓口担当者を選べます。",
+    )
+    linked_contact = (
+        next((c for c in customer_contacts if c["id"] == contact_id_choice), None)
+        if contact_id_choice != NO_CONTACT_CHOICE
+        else None
+    )
+
     with st.form("new_project_form"):
         new_name = st.text_input("案件名", placeholder="例: 〇〇邸 改修工事")
         if linked_property is not None:
@@ -463,6 +495,10 @@ elif view_mode == "create":
                     project_store.set_property_link(
                         new_project["id"], linked_property["id"], linked_property["name"]
                     )
+                if linked_contact is not None:
+                    project_store.set_customer_contact(
+                        new_project["id"], linked_contact["id"], linked_contact["name"]
+                    )
                 if cover_photo_file is not None:
                     project_store.set_cover_photo(
                         new_project["id"], cover_photo_file.name, cover_photo_file.getvalue()
@@ -504,6 +540,8 @@ elif view_mode == "detail":
 
     st.title(f"📁 {project['name']}")
     caption_text = f"顧客名: {project.get('customer_name') or '未設定'}"
+    if project.get("customer_contact_name"):
+        caption_text += f"　／　顧客担当者: {project['customer_contact_name']}"
     if project.get("property_name"):
         caption_text += f"　／　物件: {project['property_name']}"
     st.caption(caption_text)
@@ -529,9 +567,38 @@ elif view_mode == "detail":
             if cover_bytes:
                 st.image(cover_bytes, caption="現在の現場建物写真", width=240)
 
+        # 顧客担当者の選択肢は、現在保存されている顧客名をもとに作る（フォーム内で
+        # 顧客名を変更しても、保存するまではその変更に連動しない。変更した場合は
+        # 一度保存してから、あらためて顧客担当者を選び直してください）。
+        current_customer = next((c for c in customers if c["name"] == current_customer_name), None)
+        existing_contacts = (
+            get_customer_contacts_for_customer(current_customer["id"])
+            if current_customer is not None
+            else []
+        )
+        NO_CONTACT_CHOICE_EDIT = "（選択しない）"
+        edit_contact_option_ids = [NO_CONTACT_CHOICE_EDIT] + [c["id"] for c in existing_contacts]
+        current_contact_id = project.get("customer_contact_id")
+        default_contact_index = (
+            edit_contact_option_ids.index(current_contact_id)
+            if current_contact_id in edit_contact_option_ids
+            else 0
+        )
+
         with st.form("basic_info_form"):
             customer_name = st.selectbox(
                 "顧客名", options=customer_names, index=default_customer_index
+            )
+            contact_choice = st.selectbox(
+                "顧客担当者",
+                options=edit_contact_option_ids,
+                index=default_contact_index,
+                format_func=lambda x: (
+                    x if x == NO_CONTACT_CHOICE_EDIT
+                    else next(c["name"] for c in existing_contacts if c["id"] == x)
+                ),
+                help="顧客担当者データベースに登録済みの、この顧客側の窓口担当者を選べます"
+                "（顧客名を変更した場合は、保存後にあらためて選び直してください）。",
             )
             address = st.text_input("現場住所", value=project.get("address", ""))
             col_start, col_end = st.columns(2)
@@ -563,6 +630,16 @@ elif view_mode == "detail":
                     start_date_value.isoformat(),
                     end_date_value.isoformat(),
                     overview,
+                )
+                selected_contact = (
+                    next((c for c in existing_contacts if c["id"] == contact_choice), None)
+                    if contact_choice != NO_CONTACT_CHOICE_EDIT
+                    else None
+                )
+                project_store.set_customer_contact(
+                    selected_id,
+                    selected_contact["id"] if selected_contact else None,
+                    selected_contact["name"] if selected_contact else "",
                 )
                 if cover_photo_file is not None:
                     project_store.set_cover_photo(

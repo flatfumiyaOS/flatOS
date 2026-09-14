@@ -78,6 +78,10 @@ def create_project(name: str) -> dict:
         "id": new_id,
         "name": name,
         "customer_name": "",
+        # 顧客側の窓口担当者（顧客担当者データベースに登録済みの担当者）。未選択なら
+        # customer_contact_id=None のまま。
+        "customer_contact_id": None,
+        "customer_contact_name": "",
         "address": "",
         "start_date": "",
         "end_date": "",
@@ -119,6 +123,17 @@ def create_project(name: str) -> dict:
 def set_property_link(project_id: int, property_id: int, property_name: str) -> None:
     """この案件がどの物件から作られたかを記録する（見積書ページの「物件から作成」用）。"""
     _update_project(project_id, property_id=property_id, property_name=property_name)
+
+
+def set_customer_contact(
+    project_id: int, customer_contact_id: int | None, customer_contact_name: str
+) -> None:
+    """この案件の、顧客側の窓口担当者（顧客担当者データベースに登録済みの担当者）を設定する。"""
+    _update_project(
+        project_id,
+        customer_contact_id=customer_contact_id,
+        customer_contact_name=customer_contact_name,
+    )
 
 
 def archive_project(project_id: int) -> None:
