@@ -19,7 +19,7 @@ from db import (
     get_customer_contacts_for_customer,
     init_db,
 )
-from layout import APP_ICON_PATH, inject_gsheet_autoheight
+from layout import APP_ICON_PATH
 from postal import lookup_postal_code
 
 ESTIMATE_DETAIL_SHEET = "御見積内訳書"
@@ -242,12 +242,13 @@ st.markdown(
         /* アプリのページ本体は普通にスクロールできるようにしたまま、スプレッドシート
            （iframe）の端までスクロールしたときに、その続きがページ本体側のスクロールに
            漏れ出さないようにする（overscroll-behavior: contain）。
-           高さの正確な値は、内容量によって変わるためJavaScript側
-           （layout.inject_gsheet_autoheight）で計算し直す。ここでは読み込み直後の
-           一瞬だけ使われる目安の値を指定しておく。 */
+           高さはJavaScriptで動的に変更すると、埋め込んだGoogleスプレッドシート側の
+           内部スクロールが正しく効かなくなることがあったため、固定のCSS値のみにする。
+           上のpadding-topを増やした分・新規作成フォームをトグルで折りたたんだ分だけ
+           差し引く。 */
         iframe.gsheet-embed {
             width: 100%;
-            height: calc(100vh - 10rem);
+            height: calc(100vh - 11rem);
             border: none;
             display: block;
             overscroll-behavior: contain;
@@ -530,7 +531,6 @@ st.markdown(
     f'<iframe class="gsheet-embed" src="{sheets.spreadsheet_url(current_id)}"></iframe>',
     unsafe_allow_html=True,
 )
-inject_gsheet_autoheight()
 
 # チャットのトグル・パネルは、ページ固有のウィジェット（顧客選択など）をすべて
 # 生成し終えたあとに呼び出す。先に呼び出すと、チャットの開閉ボタンが押されたときの

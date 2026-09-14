@@ -26,47 +26,6 @@ def show_header() -> None:
     _inject_home_screen_icon()
 
 
-def inject_gsheet_autoheight(bottom_margin_px: int = 16) -> None:
-    """見積書・工程表ページに埋め込むGoogleスプレッドシート（class="gsheet-embed"の
-    iframe）の高さを、画面の高さいっぱいに自動で合わせる。
-
-    サイドバーの開閉やブラウザの高さ、iframeより上に表示される内容の量（検索欄・
-    警告メッセージの有無など）によって使える縦幅が変わるため、CSSの固定値ではなく
-    実際の位置関係をJavaScriptで計算し直す（画面読み込み時・ウィンドウリサイズ時、
-    および各ページの再描画のたびに実行される）。
-    """
-    components.html(
-        f"""
-        <script>
-        (function() {{
-            const doc = window.parent.document;
-            function resizeGsheetEmbed() {{
-                const iframe = doc.querySelector('iframe.gsheet-embed');
-                if (!iframe) {{
-                    return;
-                }}
-                const top = iframe.getBoundingClientRect().top;
-                const available = window.parent.innerHeight - top - {bottom_margin_px};
-                if (available > 200) {{
-                    iframe.style.height = available + 'px';
-                }}
-            }}
-            resizeGsheetEmbed();
-            // iframe読み込み直後はまだレイアウトが確定しきっていないことがあるため、
-            // 少し時間を置いてもう一度計算し直す。
-            setTimeout(resizeGsheetEmbed, 300);
-            if (!window.parent.__flatosGsheetAutoheightBound) {{
-                window.parent.__flatosGsheetAutoheightBound = true;
-                window.parent.addEventListener('resize', resizeGsheetEmbed);
-            }}
-        }})();
-        </script>
-        """,
-        height=0,
-        width=0,
-    )
-
-
 def _inject_home_screen_icon() -> None:
     """スマホで「ホーム画面に追加」した際のアイコンを、ロゴ（Fマーク）に差し替える。
 
