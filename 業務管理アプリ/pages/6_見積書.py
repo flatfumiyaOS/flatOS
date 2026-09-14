@@ -330,15 +330,6 @@ else:
                 st.session_state["current_project_name"] = selected_estimate_project["name"]
                 st.rerun()
 
-    st.divider()
-
-    source_mode = st.radio(
-        "見積書のもとになる情報",
-        options=["案件", "物件"],
-        horizontal=True,
-        key="estimate_source_mode",
-    )
-
     customers = get_all_customers()
     create_clicked = False
     project_choice = None
@@ -347,68 +338,79 @@ else:
     property_id = None
     property_project_name = ""
     contact_options: dict[str, dict] = {}
+    existing_projects = []
 
-    if source_mode == "案件":
-        NEW_PROJECT_CHOICE = "（新規に案件を作成）"
-        existing_projects = [p for p in project_store.get_all_projects() if not p.get("archived")]
-        project_choice_options = [NEW_PROJECT_CHOICE] + [p["name"] for p in existing_projects]
-        project_choice = st.selectbox(
-            "案件を選択", options=project_choice_options, key="estimate_project_choice"
+    # 新規作成の項目一式は、普段（既存の見積書を開くだけのとき）は場所を取らないよう、
+    # 初期状態で閉じておくトグルの中にまとめる。
+    if st.toggle("＋ 新しい見積書を作成する", key="show_new_estimate_form"):
+        source_mode = st.radio(
+            "見積書のもとになる情報",
+            options=["案件", "物件"],
+            horizontal=True,
+            key="estimate_source_mode",
         )
 
-        if project_choice == NEW_PROJECT_CHOICE:
-            customer_names = ["（選択してください）"] + [c["name"] for c in customers]
-            for contact in get_all_customer_contacts():
-                label = f"{contact['customer_name']}　担当: {contact['name']}"
-                contact_options[label] = dict(contact)
-            st.selectbox(
-                "顧客を選択（顧客担当者から選ぶこともできます）",
-                options=customer_names + list(contact_options.keys()),
-                key="selected_customer_name",
+        if source_mode == "案件":
+            NEW_PROJECT_CHOICE = "（新規に案件を作成）"
+            existing_projects = [p for p in project_store.get_all_projects() if not p.get("archived")]
+            project_choice_options = [NEW_PROJECT_CHOICE] + [p["name"] for p in existing_projects]
+            project_choice = st.selectbox(
+                "案件を選択", options=project_choice_options, key="estimate_project_choice"
             )
 
-            col_name, col_button = st.columns([3, 1])
-            with col_name:
-                new_project_name = st.text_input(
-                    "新規案件名",
-                    key="new_project_name",
-                    label_visibility="collapsed",
-                    placeholder="新規案件名（例: 〇〇邸 改修工事）",
+            if project_choice == NEW_PROJECT_CHOICE:
+                customer_names = ["（選択してください）"] + [c["name"] for c in customers]
+                for contact in get_all_customer_contacts():
+                    label = f"{contact['customer_name']}　担当: {contact['name']}"
+                    contact_options[label] = dict(contact)
+                st.selectbox(
+                    "顧客を選択（顧客担当者から選ぶこともできます）",
+                    options=customer_names + list(contact_options.keys()),
+                    key="selected_customer_name",
                 )
-            with col_button:
+
+                col_name, col_button = st.columns([3, 1])
+                with col_name:
+                    new_project_name = st.text_input(
+                        "新規案件名",
+                        key="new_project_name",
+                        label_visibility="collapsed",
+                        placeholder="新規案件名（例: 〇〇邸 改修工事）",
+                    )
+                with col_button:
+                    create_clicked = st.button(
+                        "新規見積作成", key="create_estimate_button", width="stretch"
+                    )
+            else:
+                st.caption(f"「{project_choice}」の見積書を新規作成します。")
                 create_clicked = st.button(
                     "新規見積作成", key="create_estimate_button", width="stretch"
                 )
         else:
-            st.caption(f"「{project_choice}」の見積書を新規作成します。")
-            create_clicked = st.button(
-                "新規見積作成", key="create_estimate_button", width="stretch"
-            )
-    else:
-        properties = property_store.get_all_properties()
-        if not properties:
-            st.info("先に「物件管理」ページで物件を登録してください。")
-        else:
-            property_id = st.selectbox(
-                "物件を選択",
-                options=[p["id"] for p in properties],
-                format_func=lambda x: next(
-                    f"{p['customer_name']} / {p['name']}" for p in properties if p["id"] == x
-                ),
-                key="estimate_property_choice",
-            )
-            col_name, col_button = st.columns([3, 1])
-            with col_name:
-                property_project_name = st.text_input(
-                    "案件名（今回の工事内容を入力）",
-                    key="estimate_property_project_name",
-                    label_visibility="collapsed",
-                    placeholder="案件名（例: 3階トイレ改修工事）",
+            properties = property_store.get_all_properties()
+            if not properties:
+                st.info("先に「物件管理」ページで物件を登録してください。")
+            else:
+                property_id = st.selectbox(
+                    "物件を選択",
+                    options=[p["id"] for p in properties],
+                    format_func=lambda x: next(
+                        f"{p['customer_name']} / {p['name']}" for p in properties if p["id"] == x
+                    ),
+                    key="estimate_property_choice",
                 )
-            with col_button:
-                create_clicked = st.button(
-                    "新規見積作成", key="create_estimate_button_property", width="stretch"
-                )
+                col_name, col_button = st.columns([3, 1])
+                with col_name:
+                    property_project_name = st.text_input(
+                        "案件名（今回の工事内容を入力）",
+                        key="estimate_property_project_name",
+                        label_visibility="collapsed",
+                        placeholder="案件名（例: 3階トイレ改修工事）",
+                    )
+                with col_button:
+                    create_clicked = st.button(
+                        "新規見積作成", key="create_estimate_button_property", width="stretch"
+                    )
 
     if create_clicked:
         if source_mode == "案件" and project_choice == "（新規に案件を作成）" and not new_project_name.strip():
