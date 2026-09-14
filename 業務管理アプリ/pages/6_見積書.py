@@ -355,20 +355,24 @@ else:
             NEW_PROJECT_CHOICE = "（新規に案件を作成）"
             existing_projects = [p for p in project_store.get_all_projects() if not p.get("archived")]
             project_choice_options = [NEW_PROJECT_CHOICE] + [p["name"] for p in existing_projects]
-            project_choice = st.selectbox(
-                "案件を選択", options=project_choice_options, key="estimate_project_choice"
-            )
+
+            col_project, col_customer = st.columns(2)
+            with col_project:
+                project_choice = st.selectbox(
+                    "案件を選択", options=project_choice_options, key="estimate_project_choice"
+                )
 
             if project_choice == NEW_PROJECT_CHOICE:
                 customer_names = ["（選択してください）"] + [c["name"] for c in customers]
                 for contact in get_all_customer_contacts():
                     label = f"{contact['customer_name']}　担当: {contact['name']}"
                     contact_options[label] = dict(contact)
-                st.selectbox(
-                    "顧客を選択（顧客担当者から選ぶこともできます）",
-                    options=customer_names + list(contact_options.keys()),
-                    key="selected_customer_name",
-                )
+                with col_customer:
+                    st.selectbox(
+                        "顧客を選択（顧客担当者から選ぶこともできます）",
+                        options=customer_names + list(contact_options.keys()),
+                        key="selected_customer_name",
+                    )
 
                 col_name, col_button = st.columns([3, 1])
                 with col_name:
