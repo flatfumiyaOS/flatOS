@@ -19,14 +19,21 @@ import schedule_store
 import sheets
 from chat import show_chat_panel, show_chat_toggle
 from db import get_all_customers
-from layout import APP_ICON_PATH, show_header
+from layout import APP_ICON_PATH, inject_gsheet_autoheight, show_header
 
 # B列以降の列幅（ピクセル）。新規作成した工程表には自動的にこの幅を適用する。
 SCHEDULE_COLUMN_WIDTH_PX = 33
 # 表紙エリアの2〜4行目・工種の行の高さ（ピクセル）。
 SCHEDULE_ROW_HEIGHT_PX = 31
 
-st.set_page_config(page_title="工程表", page_icon=str(APP_ICON_PATH), layout="wide")
+st.set_page_config(
+    page_title="工程表",
+    page_icon=str(APP_ICON_PATH),
+    layout="wide",
+    # スプレッドシートの編集領域を広く使えるよう、左のメニューは初期状態で閉じておく
+    # （画面左上の「>>」から開き直せる）。
+    initial_sidebar_state="collapsed",
+)
 auth_gate.require_password()
 
 google_auth.handle_login_redirect()
@@ -48,10 +55,12 @@ st.markdown(
         /* アプリのページ本体は普通にスクロールできるようにしたまま、スプレッドシート
            （iframe）の端までスクロールしたときに、その続きがページ本体側のスクロールに
            漏れ出さないようにする（overscroll-behavior: contain）。
-           上のpadding-topを増やした分、iframeの高さもその分差し引く。 */
+           高さの正確な値は、内容量によって変わるためJavaScript側
+           （layout.inject_gsheet_autoheight）で計算し直す。ここでは読み込み直後の
+           一瞬だけ使われる目安の値を指定しておく。 */
         iframe.gsheet-embed {
             width: 100%;
-            height: calc(100vh - 13.5rem);
+            height: calc(100vh - 10rem);
             border: none;
             display: block;
             overscroll-behavior: contain;
@@ -295,6 +304,7 @@ else:
                 f'src="{sheets.spreadsheet_url(schedule["spreadsheet_id"])}"></iframe>',
                 unsafe_allow_html=True,
             )
+            inject_gsheet_autoheight()
 
 # チャットのトグル・パネルは、ページ固有のウィジェット（工程表選択など）をすべて
 # 生成し終えたあとに呼び出す。先に呼び出すと、チャットの開閉ボタンが押されたときの
