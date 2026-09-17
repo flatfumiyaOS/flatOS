@@ -50,7 +50,7 @@ try:
 except ImportError:
     anthropic = None
 
-MODEL_NAME = "claude-sonnet-5"
+MODEL_NAME = "claude-opus-5"
 
 # チャットのメモリー機能で使う分類。ページごとに対応するカテゴリを指定してもらう
 # （見積書ページ以外はまだ存在しないが、今後の追加時に手直しが少なくて済むよう
@@ -1023,7 +1023,7 @@ def _call_claude(messages: list[dict], category: str) -> str:
         conversation = _prepare_conversation_for_api(client, messages)
 
         for _ in range(30):  # ツール呼び出しの無限ループを防ぐための上限（見積書の明細入力は工程が多いため多めに確保）
-            # max_tokensは十分大きくし（Claude Sonnet 5の上限は128,000）、タイムアウト
+            # max_tokensは十分大きくし（Claude Opus 5の上限は128,000）、タイムアウト
             # 防止のためストリーミングで取得する。明細の多い案件では1回のやりとりの
             # 出力量が多く、既定の小さいmax_tokensだと文章の途中でstop_reason="max_tokens"
             # となって打ち切られ、ツール呼び出しに辿り着けないまま無言で終わってしまう
