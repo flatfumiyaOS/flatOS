@@ -7,9 +7,21 @@
 
 from __future__ import annotations
 
+import os
+
 import streamlit as st
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
+
+# ユーザーが過去にこのOAuthクライアントへ別のスコープ（例: 以前試験的に追加していた
+# gmail.readonly）を一度でも許可していると、Googleはauthorization_url()の
+# include_granted_scopes="true"により、今回明示的に要求していないスコープも
+# まとめて返してくることがある。その結果、fetch_token()時に実際に返ってきた
+# スコープが要求したSCOPESと一致せず、google-auth-oauthlib側が
+# 「Scope has changed」エラーを投げて毎回ログインに失敗していた。
+# OAUTHLIB_RELAX_TOKEN_SCOPEを設定すると、この厳密な一致チェックを緩め、
+# 実際に許可された（要求より多い）スコープをそのまま受け入れるようになる。
+os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 
