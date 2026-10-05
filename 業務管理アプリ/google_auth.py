@@ -11,7 +11,13 @@ import streamlit as st
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 
-SCOPES = ["https://www.googleapis.com/auth/drive"]
+SCOPES = [
+    "https://www.googleapis.com/auth/drive",
+    # 案件の「現在の進捗確認」ページで、関連するメールを検索・要約するために使う
+    # （読み取り専用。メールの送信・削除などは行わない）。
+    "https://www.googleapis.com/auth/gmail.readonly",
+]
+GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 
 
 def _get_redirect_uri() -> str:
@@ -94,6 +100,19 @@ def get_credentials() -> Credentials | None:
 
 def is_logged_in() -> bool:
     return get_credentials() is not None
+
+
+def has_gmail_access() -> bool:
+    """メール読み取り権限（gmail.readonly）まで許可済みのログインかどうか。
+
+    Drive権限のみでログイン済みの古いセッションでは、ログアウトして
+    「Googleでログイン」をやり直すまでこれはFalseのままになる
+    （SCOPESにgmail.readonlyを追加する前に発行されたトークンのため）。
+    """
+    credentials = get_credentials()
+    if credentials is None:
+        return False
+    return GMAIL_READONLY_SCOPE in (credentials.scopes or [])
 
 
 def logout() -> None:

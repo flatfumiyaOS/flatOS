@@ -108,6 +108,7 @@ def create_project(name: str) -> dict:
         "documents": [],
         "photos": [],
         "participating_vendors": [],
+        "progress_log": [],
         "cover_photo": None,
         "spreadsheet_id": None,
         "schedule_spreadsheet_id": None,
@@ -425,6 +426,36 @@ def remove_participating_vendor(project_id: int, entry_id: int) -> None:
                 e for e in p.get("participating_vendors", []) if e["id"] != entry_id
             ]
             p["updated_at"] = _now()
+            break
+    _save_all(projects)
+
+
+def add_progress_log_entries(project_id: int, entries: list[dict]) -> None:
+    """案件の「現在の進捗確認」ログに、Gmail要約などの新しいエントリを追加する。
+
+    entriesは {"date", "summary", "gmail_message_id"(任意)} の辞書のリスト。
+    同じメールを重複して取り込まないようにする判定（gmail_message_idの重複チェック）は
+    呼び出し側（gmail_progress.fetch_and_summarize_progressのexclude_message_ids）で
+    行う前提とする。
+    """
+    projects = _load_all()
+    for p in projects:
+        if p["id"] == project_id:
+            log = p.setdefault("progress_log", [])
+            now = _now()
+            for entry in entries:
+                new_entry_id = max((e["id"] for e in log), default=0) + 1
+                log.append(
+                    {
+                        "id": new_entry_id,
+                        "date": entry["date"],
+                        "summary": entry["summary"],
+                        "source": "gmail",
+                        "gmail_message_id": entry.get("gmail_message_id"),
+                        "created_at": now,
+                    }
+                )
+            p["updated_at"] = now
             break
     _save_all(projects)
 
