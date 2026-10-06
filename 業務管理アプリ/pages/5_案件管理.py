@@ -16,6 +16,7 @@ import streamlit as st
 from PIL import Image
 
 import auth_gate
+import gmail_progress
 import google_auth
 import project_store
 import property_store
@@ -548,8 +549,16 @@ elif view_mode == "detail":
     if project.get("archived"):
         st.warning("この案件は非表示に設定されています（案件一覧・会計画面には表示されません）。")
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
-        ["① 基本情報", "② 各種資料", "③ 工程表", "④ 現場写真", "⑤ 見積連携", "⑥ 参加業者"]
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+        [
+            "① 基本情報",
+            "② 各種資料",
+            "③ 工程表",
+            "④ 現場写真",
+            "⑤ 見積連携",
+            "⑥ 参加業者",
+            "⑦ 現在の進捗確認",
+        ]
     )
 
     with tab1:
@@ -973,6 +982,62 @@ elif view_mode == "detail":
                     )
                     st.success("追加しました。")
                     st.rerun()
+
+    with tab7:
+        st.caption(
+            "顧客名・案件名をキーワードにGmailを検索し、関係しそうなメールをAIが判定・"
+            "要約した一覧です（直近90日分が対象）。AIの判定には誤り（関係ないメールの"
+            "混入や、関係あるメールの見落とし）があり得るため、参考情報としてご利用ください。"
+        )
+        if not google_auth.is_logged_in():
+            st.link_button("Googleでログイン", google_auth.get_login_url())
+            st.caption("メールを検索するには、Googleアカウントでログインしてください。")
+        elif not google_auth.has_gmail_access():
+            st.warning(
+                "メールの読み取り権限がまだ許可されていません。この機能を使うには、"
+                "一度ログアウトしてから「Googleでログイン」をやり直し、新しい権限"
+                "（メールの読み取り）を許可してください。"
+            )
+            if st.button("ログアウトする", key="logout_for_gmail_access"):
+                google_auth.logout()
+                st.rerun()
+        else:
+            existing_log = project.get("progress_log", [])
+            if st.button("更新する", key="refresh_progress_log_button", type="primary"):
+                with st.spinner("Gmailを検索し、AIが内容を確認しています..."):
+                    try:
+                        exclude_ids = {
+                            e["gmail_message_id"]
+                            for e in existing_log
+                            if e.get("gmail_message_id")
+                        }
+                        new_entries = gmail_progress.fetch_and_summarize_progress(
+                            project.get("customer_name", ""),
+                            project["name"],
+                            project.get("address", ""),
+                            google_auth.get_credentials(),
+                            exclude_ids,
+                        )
+                        if new_entries:
+                            project_store.add_progress_log_entries(selected_id, new_entries)
+                            st.success(f"{len(new_entries)}件、新しく追加しました。")
+                        else:
+                            st.info("新しく関係しそうなメールは見つかりませんでした。")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"更新に失敗しました: {exc}")
+
+            st.divider()
+            if existing_log:
+                sorted_log = sorted(
+                    existing_log, key=lambda e: (e["date"], e.get("created_at", "")), reverse=True
+                )
+                for entry in sorted_log:
+                    entry_date = _parse_date(entry["date"])
+                    date_label = f"{entry_date.month}/{entry_date.day}" if entry_date else entry["date"]
+                    st.write(f"{date_label}　{entry['summary']}")
+            else:
+                st.caption("まだ進捗ログがありません。「更新する」を押してください。")
 
 # チャットのトグル・パネルは、ページ固有のウィジェット（一覧のフィルターや詳細の
 # タブなど）をすべて生成し終えたあとに呼び出す。先に呼び出すと、チャットの開閉
