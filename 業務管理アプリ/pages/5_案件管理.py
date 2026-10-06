@@ -1003,6 +1003,7 @@ elif view_mode == "detail":
                 st.rerun()
         else:
             existing_log = project.get("progress_log", [])
+            todo_session_key = f"todo_items_{selected_id}"
             if st.button("更新する", key="refresh_progress_log_button", type="primary"):
                 with st.spinner("Gmailを検索し、AIが内容を確認しています..."):
                     try:
@@ -1020,14 +1021,37 @@ elif view_mode == "detail":
                         )
                         if new_entries:
                             project_store.add_progress_log_entries(selected_id, new_entries)
-                            st.success(f"{len(new_entries)}件、新しく追加しました。")
+
+                        # TO DOは進捗ログと違い蓄積しない。更新のたびに「今の状態」を
+                        # 作り直し、前回分を置き換える（返信済みになれば自然に消える）。
+                        todo_items = gmail_progress.fetch_todo_items(
+                            project.get("customer_name", ""),
+                            project["name"],
+                            project.get("address", ""),
+                            google_auth.get_credentials(),
+                        )
+                        st.session_state[todo_session_key] = todo_items
+
+                        if new_entries:
+                            st.success(f"進捗ログに{len(new_entries)}件、新しく追加しました。")
                         else:
                             st.info("新しく関係しそうなメールは見つかりませんでした。")
                         st.rerun()
                     except Exception as exc:
                         st.error(f"更新に失敗しました: {exc}")
 
+            st.markdown("##### TO DO（対応・返信が必要そうなもの）")
+            todo_items = st.session_state.get(todo_session_key)
+            if todo_items is None:
+                st.caption("「更新する」を押すと、対応待ちになっていそうなメールを確認します。")
+            elif todo_items:
+                for item in todo_items:
+                    st.write(f"・{item['summary']}")
+            else:
+                st.caption("対応待ちになっていそうなメールは見つかりませんでした。")
+
             st.divider()
+            st.markdown("##### 進捗ログ")
             if existing_log:
                 sorted_log = sorted(
                     existing_log, key=lambda e: (e["date"], e.get("created_at", "")), reverse=True
