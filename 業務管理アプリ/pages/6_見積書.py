@@ -445,8 +445,10 @@ else:
                             )
                             project_name = linked_project_existing["name"]
                             linked_customer_name = linked_project_existing.get("customer_name")
-                            # 案件が持つ住所（現場住所）はそのまま使いつつ、敬称・担当者の
-                            # 判定に必要な情報は顧客データベース側の一致するレコードから補う。
+                            # 見積書の宛先住所は、案件の現場住所ではなく、顧客データベースに
+                            # 登録された顧客自身の住所を使う（現場住所と顧客の住所が異なる
+                            # ケース、例えば管理会社が顧客でお客様から別の現場での工事を
+                            # 依頼されている場合などがあるため）。
                             db_customer_row = next(
                                 (c for c in customers if c["name"] == linked_customer_name), None
                             )
@@ -454,7 +456,7 @@ else:
                                 {
                                     "id": db_customer_row["id"] if db_customer_row else None,
                                     "name": linked_customer_name,
-                                    "address": linked_project_existing.get("address", ""),
+                                    "address": db_customer_row["address"] if db_customer_row else "",
                                     "postal_code": db_customer_row["postal_code"] if db_customer_row else "",
                                     "honorific": db_customer_row["honorific"] if db_customer_row else "様",
                                 }
@@ -474,9 +476,10 @@ else:
                             effective_address = (db_customer_row["address"] or "") if db_customer_row else ""
                         else:
                             effective_address = selected_property["address"] or ""
+                        # 見積書の宛先住所は、現場（物件）の住所ではなく、顧客データベースに
+                        # 登録された顧客自身の住所を使う（現場住所はeffective_addressとして
+                        # 別途、案件の「現場住所」欄にのみ使う）。
                         customer_row = dict(db_customer_row) if db_customer_row else None
-                        if customer_row is not None:
-                            customer_row["address"] = effective_address
 
                         # 物件は工事完了後も現場として残り続けるため、同じ物件に対して
                         # 案件名を変えながら何度も見積書を作ることを想定する。案件名が
