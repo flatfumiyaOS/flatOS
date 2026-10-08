@@ -107,17 +107,25 @@ def _find_previous_estimate_honorific(customer_name: str, exclude_project_id) ->
 
 def _fill_estimate_defaults(
     spreadsheet_id: str, customer_row, project_name: str, exclude_project_id=None, office: str = "",
-    contact_override: dict | None = None,
+    contact_override: dict | None = None, payment_terms: str = "",
 ) -> None:
-    """新規作成した見積書に、顧客名・住所・郵便番号・案件名をあらかじめ入力しておく。
+    """新規作成した見積書に、顧客名・住所・郵便番号・案件名・支払条件をあらかじめ入力しておく。
 
     contact_overrideは、見積書作成時に顧客ではなく特定の顧客担当者を選んだ場合に渡す。
     指定されている場合は、過去の見積書からの表記の引き継ぎより、その担当者宛の表記を優先する。
+    payment_termsは案件の「自社情報」で選んだ支払条件（project_store.PAYMENT_TERMS_OPTIONS）。
+    案件作成直後などまだ選ばれていない場合は空文字になり、その場合はテンプレートの
+    既定表記のままにする（「御見積書」側はテンプレートの数式で「御見積内訳書」の
+    値をそのまま参照しているため、ここでは「御見積内訳書」側だけ書き換えればよい）。
     """
     overrides = OFFICE_ADDRESS_OVERRIDES.get(office)
     if overrides:
         for cell, value in overrides.items():
             sheets.write_cell(spreadsheet_id, ESTIMATE_SUMMARY_SHEET, cell, value)
+
+    if payment_terms:
+        sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "B17", payment_terms)
+        sheets.write_cell(spreadsheet_id, ESTIMATE_DETAIL_SHEET, "B18", payment_terms)
 
     if customer_row is not None:
         customer_row = dict(customer_row)
@@ -506,6 +514,7 @@ else:
                         new_id, customer_row, project_name,
                         exclude_project_id=linked_project["id"], office=linked_project.get("office", ""),
                         contact_override=contact_override,
+                        payment_terms=linked_project.get("payment_terms", ""),
                     )
                     _clear_old_example_rows(new_id)
 
