@@ -492,6 +492,22 @@ def _share_with_service_account(drive_service, file_id: str) -> None:
     ).execute()
 
 
+def share_with_service_account(spreadsheet_id: str, user_credentials: UserCredentials) -> None:
+    """既存のスプレッドシート（ユーザー本人が所有・編集権限を持つもの）に、
+    サービスアカウントの編集権限を追加する。
+
+    見積書・工程表の「連携する」（URL/IDを貼り付けて既存のスプレッドシートを
+    案件に紐付ける機能）で使う。新規作成（create_estimate_spreadsheet等）は
+    作成直後に自動でサービスアカウントと共有しているが、既存ファイルを連携する
+    場合はこの処理を通らないため、呼び出し側で明示的に呼ぶ必要がある
+    （呼び忘れると、チャットでの読み書きや会計機能での合計金額の読み取りが
+    できなくなる）。ユーザー本人に共有権限（オーナーまたは「共有可能」な編集者）が
+    無いスプレッドシートを連携しようとした場合は例外を送出する。
+    """
+    drive_service = build("drive", "v3", credentials=user_credentials)
+    _share_with_service_account(drive_service, spreadsheet_id)
+
+
 def create_estimate_spreadsheet(project_name: str, user_credentials: UserCredentials) -> str:
     """テンプレートをユーザー本人のGoogleアカウントの権限でコピーし、
     新しい見積書スプレッドシートを作成する。

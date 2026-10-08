@@ -795,13 +795,26 @@ with tab3:
 
             if st.button("請求データを作成", key="billing_create_button", type="primary"):
                 billing_project = project_store.get_project(billing_project_id)
-                estimate_total = _read_estimate_total(billing_project["spreadsheet_id"])
-                if estimate_total is None:
+                try:
+                    sheets.read_range(billing_project["spreadsheet_id"], "御見積書", "E1:F1")
+                except Exception as exc:
                     st.error(
-                        "見積書スプレッドシートから合計金額を読み取れませんでした。"
-                        "見積書に「合計」欄が入力されているかご確認ください。"
+                        "見積書スプレッドシートを読み込めませんでした。アプリの裏側で使う"
+                        "アカウント（"
+                        f"{sheets._get_service_account_email()}"
+                        "）がこのスプレッドシートに共有されていない可能性があります。"
+                        "「案件管理」の「見積連携」タブで連携し直すか、スプレッドシートの"
+                        f"共有設定にこのアカウントを編集者として追加してください。\n\n詳細: {exc}"
                     )
+                    estimate_total = None
                 else:
+                    estimate_total = _read_estimate_total(billing_project["spreadsheet_id"])
+                    if estimate_total is None:
+                        st.error(
+                            "見積書スプレッドシートから合計金額を読み取れませんでした。"
+                            "見積書に「合計」欄が入力されているかご確認ください。"
+                        )
+                if estimate_total is not None:
                     with st.spinner("請求書を作成しています..."):
                         try:
                             amount = round(estimate_total * ratio_percent / 100)

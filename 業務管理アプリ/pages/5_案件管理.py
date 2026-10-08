@@ -831,6 +831,15 @@ elif view_mode == "detail":
             if st.button("連携する", key="link_schedule_button"):
                 if schedule_link_input.strip():
                     new_schedule_id = _extract_spreadsheet_id(schedule_link_input.strip())
+                    try:
+                        sheets.share_with_service_account(
+                            new_schedule_id, google_auth.get_credentials()
+                        )
+                    except Exception as exc:
+                        st.warning(
+                            "スプレッドシートへのアクセス権限の設定に失敗しました"
+                            f"（{exc}）。チャットでの編集ができない場合があります。"
+                        )
                     project_store.set_schedule_spreadsheet_id(selected_id, new_schedule_id)
                     st.success("工程表を連携しました。")
                     st.rerun()
@@ -927,6 +936,16 @@ elif view_mode == "detail":
             if st.button("連携する", key="link_estimate_button"):
                 if estimate_link_input.strip():
                     new_estimate_id = _extract_spreadsheet_id(estimate_link_input.strip())
+                    try:
+                        sheets.share_with_service_account(
+                            new_estimate_id, google_auth.get_credentials()
+                        )
+                    except Exception as exc:
+                        st.warning(
+                            "スプレッドシートへのアクセス権限の設定に失敗しました"
+                            f"（{exc}）。チャットでの編集や、請求書作成時の金額読み取りが"
+                            "できない場合があります。"
+                        )
                     project_store.set_spreadsheet_id(selected_id, new_estimate_id)
                     st.success("見積書を連携しました。")
                     st.rerun()
