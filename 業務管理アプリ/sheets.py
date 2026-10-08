@@ -10,7 +10,10 @@ Googleアカウント（OAuthログイン）の権限で行う必要がある。
 from __future__ import annotations
 
 import datetime
+import functools
 import json
+import random
+import time
 from pathlib import Path
 
 import gspread
@@ -22,6 +25,38 @@ from googleapiclient.http import MediaFileUpload
 from gspread.utils import ValueInputOption
 
 import drive_storage
+
+# Google Sheets APIは、短時間に呼び出しが集中すると一時的なレート制限
+# （429 RESOURCE_EXHAUSTEDなど）を返すことがある。見積書・請求書の作成では
+# 1回の処理で何度も連続してAPIを呼ぶため、繰り返し発生しやすい。恒久的な
+# エラー（権限不足・シートが存在しないなど）はリトライしても直らないため、
+# それらはそのまま例外を送出する。
+_RETRYABLE_STATUS_CODES = (429, 500, 503)
+_RETRYABLE_STATUSES = {"RESOURCE_EXHAUSTED", "UNAVAILABLE", "INTERNAL"}
+_MAX_RETRY_ATTEMPTS = 4
+
+
+def _with_retry(func):
+    """gspread呼び出しを、一時的なレート制限に対して短い待機を挟みながら
+    最大_MAX_RETRY_ATTEMPTS回まで自動的にリトライするデコレータ。"""
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        last_exc = None
+        for attempt in range(_MAX_RETRY_ATTEMPTS):
+            try:
+                return func(*args, **kwargs)
+            except gspread.exceptions.APIError as exc:
+                last_exc = exc
+                status = (exc.error or {}).get("status", "")
+                is_retryable = exc.code in _RETRYABLE_STATUS_CODES or status in _RETRYABLE_STATUSES
+                if is_retryable and attempt < _MAX_RETRY_ATTEMPTS - 1:
+                    time.sleep((2**attempt) + random.uniform(0, 1))
+                    continue
+                raise
+        raise last_exc  # pragma: no cover — 上のループで必ずreturnかraiseする
+
+    return wrapper
 
 TEMPLATE_SPREADSHEET_ID = "1-vIOJ7nWTUZi0ChwSSsc6N2j5mq-IX3eHjVHXYd-H-A"
 
@@ -77,22 +112,26 @@ def _get_spreadsheet(spreadsheet_id: str) -> gspread.Spreadsheet:
     return _get_client().open_by_key(spreadsheet_id)
 
 
+@_with_retry
 def list_sheet_names(spreadsheet_id: str) -> list[str]:
     """スプレッドシート内のシート（タブ）名の一覧を返す。"""
     return [ws.title for ws in _get_spreadsheet(spreadsheet_id).worksheets()]
 
 
+@_with_retry
 def rename_worksheet(spreadsheet_id: str, sheet_name: str, new_name: str) -> None:
     """指定したシートの名前を変更する。"""
     worksheet = _get_spreadsheet(spreadsheet_id).worksheet(sheet_name)
     worksheet.update_title(new_name)
 
 
+@_with_retry
 def add_worksheet(spreadsheet_id: str, title: str, rows: int, cols: int) -> None:
     """スプレッドシートに、指定した行数・列数の新しい空のシートを追加する。"""
     _get_spreadsheet(spreadsheet_id).add_worksheet(title=title, rows=rows, cols=cols)
 
 
+@_with_retry
 def duplicate_worksheet_into(
     source_spreadsheet_id: str,
     source_sheet_name: str,
@@ -113,24 +152,28 @@ def duplicate_worksheet_into(
     new_worksheet.update_title(new_sheet_name)
 
 
+@_with_retry
 def read_cell(spreadsheet_id: str, sheet_name: str, cell: str) -> str | None:
     """指定したシートの指定したセル（例:"A1"）の値を読み取る。"""
     worksheet = _get_spreadsheet(spreadsheet_id).worksheet(sheet_name)
     return worksheet.acell(cell).value
 
 
+@_with_retry
 def write_cell(spreadsheet_id: str, sheet_name: str, cell: str, value: str) -> None:
     """指定したシートの指定したセルに値を書き込む。「=SUM(...)」のような数式もそのまま解釈される。"""
     worksheet = _get_spreadsheet(spreadsheet_id).worksheet(sheet_name)
     worksheet.update_acell(cell, value)
 
 
+@_with_retry
 def read_range(spreadsheet_id: str, sheet_name: str, range_a1: str) -> list[list[str]]:
     """指定した範囲（例:"A30:F40"）のセルの値をまとめて読み取る。"""
     worksheet = _get_spreadsheet(spreadsheet_id).worksheet(sheet_name)
     return worksheet.get(range_a1)
 
 
+@_with_retry
 def write_range(
     spreadsheet_id: str, sheet_name: str, range_a1: str, values: list[list[str]]
 ) -> None:
@@ -141,6 +184,7 @@ def write_range(
     )
 
 
+@_with_retry
 def write_cells(spreadsheet_id: str, sheet_name: str, cell_values: dict[str, str]) -> None:
     """複数の飛び飛びのセルに、まとめて1回のAPI呼び出しで値を書き込む。
 
@@ -152,12 +196,14 @@ def write_cells(spreadsheet_id: str, sheet_name: str, cell_values: dict[str, str
     worksheet.batch_update(data, value_input_option=ValueInputOption.user_entered)
 
 
+@_with_retry
 def delete_rows(spreadsheet_id: str, sheet_name: str, start_row: int, end_row: int) -> None:
     """指定した行範囲（1始まり、end_rowを含む）を削除する。"""
     worksheet = _get_spreadsheet(spreadsheet_id).worksheet(sheet_name)
     worksheet.delete_rows(start_row, end_row)
 
 
+@_with_retry
 def insert_rows(spreadsheet_id: str, sheet_name: str, row_index: int, num_rows: int = 1) -> None:
     """指定した行位置（1始まり）に空白の行をnum_rows行挿入する。row_index以降の
     既存の行は、その分だけ下にずれる（Googleスプレッドシート側で、ずれた行を
@@ -296,6 +342,7 @@ def add_estimate_interim_total(
     }
 
 
+@_with_retry
 def set_column_width(
     spreadsheet_id: str, sheet_name: str, start_col: int, end_col: int, width_px: int
 ) -> None:
@@ -326,6 +373,7 @@ def set_column_width(
     )
 
 
+@_with_retry
 def set_row_height(
     spreadsheet_id: str, sheet_name: str, start_row: int, end_row: int, height_px: int
 ) -> None:
@@ -352,6 +400,7 @@ def set_row_height(
     )
 
 
+@_with_retry
 def set_date_format(
     spreadsheet_id: str,
     sheet_name: str,
@@ -393,6 +442,7 @@ def set_date_format(
     )
 
 
+@_with_retry
 def set_cell_color(
     spreadsheet_id: str,
     sheet_name: str,
@@ -432,6 +482,7 @@ def set_cell_color(
     )
 
 
+@_with_retry
 def set_border(
     spreadsheet_id: str,
     sheet_name: str,
@@ -472,6 +523,7 @@ def set_border(
     )
 
 
+@_with_retry
 def get_column_count(spreadsheet_id: str, sheet_name: str) -> int:
     """指定したシートの列数（グリッドの実際の列数）を返す。"""
     worksheet = _get_spreadsheet(spreadsheet_id).worksheet(sheet_name)
