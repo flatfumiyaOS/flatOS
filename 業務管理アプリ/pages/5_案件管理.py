@@ -891,6 +891,10 @@ elif view_mode == "detail":
     with tab5:
         current_spreadsheet_id = project.get("spreadsheet_id")
         if current_spreadsheet_id:
+            st.link_button(
+                "Googleドライブで開く",
+                sheets.spreadsheet_url(current_spreadsheet_id),
+            )
             st.markdown(
                 f'<iframe src="{sheets.spreadsheet_url(current_spreadsheet_id)}" '
                 'style="width:100%; height:70vh; border:none;"></iframe>',
