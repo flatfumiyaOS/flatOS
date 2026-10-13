@@ -551,20 +551,44 @@ def _share_with_service_account(drive_service, file_id: str) -> None:
     ).execute()
 
 
+# アプリから新規作成・連携するスプレッドシートは、作成者本人のアカウントだけが
+# 権限を持つ状態になり、もう一方のアカウントでは開けない（Drive API上は
+# 「ファイルが存在しない」扱いになる）ことがある。そのため、どちらのアカウントで
+# 操作しても、必ず両方のアカウントに編集権限を付与する。
+COLLABORATOR_EMAILS = ["flatfumiya@gmail.com", "ecoflat523@gmail.com"]
+
+
+def _share_with_collaborators(drive_service, file_id: str) -> None:
+    """作成・連携したファイルに、平居史也・平居靖弘の両Googleアカウントの編集権限を
+    まとめて付与する。操作している本人のアカウントは既にオーナー/編集者のため、
+    付与が重複・失敗しても処理全体は止めない。"""
+    for email in COLLABORATOR_EMAILS:
+        try:
+            drive_service.permissions().create(
+                fileId=file_id,
+                body={"type": "user", "role": "writer", "emailAddress": email},
+                fields="id",
+                sendNotificationEmail=False,
+            ).execute()
+        except Exception:
+            pass
+
+
 def share_with_service_account(spreadsheet_id: str, user_credentials: UserCredentials) -> None:
     """既存のスプレッドシート（ユーザー本人が所有・編集権限を持つもの）に、
-    サービスアカウントの編集権限を追加する。
+    サービスアカウントと、平居史也・平居靖弘の両Googleアカウントの編集権限を追加する。
 
     見積書・工程表の「連携する」（URL/IDを貼り付けて既存のスプレッドシートを
     案件に紐付ける機能）で使う。新規作成（create_estimate_spreadsheet等）は
-    作成直後に自動でサービスアカウントと共有しているが、既存ファイルを連携する
-    場合はこの処理を通らないため、呼び出し側で明示的に呼ぶ必要がある
+    作成直後に自動で同じ共有を行っているが、既存ファイルを連携する場合は
+    この処理を通らないため、呼び出し側で明示的に呼ぶ必要がある
     （呼び忘れると、チャットでの読み書きや会計機能での合計金額の読み取りが
     できなくなる）。ユーザー本人に共有権限（オーナーまたは「共有可能」な編集者）が
     無いスプレッドシートを連携しようとした場合は例外を送出する。
     """
     drive_service = build("drive", "v3", credentials=user_credentials)
     _share_with_service_account(drive_service, spreadsheet_id)
+    _share_with_collaborators(drive_service, spreadsheet_id)
 
 
 def create_estimate_spreadsheet(project_name: str, user_credentials: UserCredentials) -> str:
@@ -591,6 +615,7 @@ def create_estimate_spreadsheet(project_name: str, user_credentials: UserCredent
     )
     new_id = new_file["id"]
     _share_with_service_account(drive_service, new_id)
+    _share_with_collaborators(drive_service, new_id)
     return new_id
 
 
@@ -615,6 +640,7 @@ def copy_spreadsheet(
     )
     new_id = new_file["id"]
     _share_with_service_account(drive_service, new_id)
+    _share_with_collaborators(drive_service, new_id)
     return new_id
 
 
@@ -648,6 +674,7 @@ def create_schedule_spreadsheet(
     )
     new_id = new_file["id"]
     _share_with_service_account(drive_service, new_id)
+    _share_with_collaborators(drive_service, new_id)
     return new_id
 
 
