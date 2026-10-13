@@ -22,7 +22,7 @@ from google.oauth2.credentials import Credentials as UserCredentials
 from google.oauth2.service_account import Credentials as ServiceAccountCredentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-from gspread.utils import ValueInputOption
+from gspread.utils import ValueInputOption, ValueRenderOption
 
 import drive_storage
 
@@ -171,6 +171,13 @@ def read_range(spreadsheet_id: str, sheet_name: str, range_a1: str) -> list[list
     """指定した範囲（例:"A30:F40"）のセルの値をまとめて読み取る。"""
     worksheet = _get_spreadsheet(spreadsheet_id).worksheet(sheet_name)
     return worksheet.get(range_a1)
+
+
+@_with_retry
+def read_cell_formula(spreadsheet_id: str, sheet_name: str, cell: str) -> str:
+    """指定したセルの数式（例:"=SUM(F32:F52)"）を、計算結果ではなくそのまま読み取る。"""
+    worksheet = _get_spreadsheet(spreadsheet_id).worksheet(sheet_name)
+    return worksheet.acell(cell, value_render_option=ValueRenderOption.formula).value or ""
 
 
 @_with_retry

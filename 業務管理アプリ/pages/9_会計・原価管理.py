@@ -824,6 +824,7 @@ with tab3:
                                 _project_label(billing_project_id),
                                 billing_date_value,
                                 google_auth.get_credentials(),
+                                ratio_percent=ratio_percent,
                             )
                             due_date_value = billing_generator.next_month_last_day(billing_date_value)
                             billing_store.add_billing(

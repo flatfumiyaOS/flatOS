@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import calendar
 import datetime
+import re
 
 from google.oauth2.credentials import Credentials as UserCredentials
 
@@ -105,11 +106,16 @@ def create_invoice_from_estimate(
     project_name: str,
     billing_date: datetime.date,
     user_credentials: UserCredentials,
+    ratio_percent: int = 100,
 ) -> str:
     """案件の見積書スプレッドシートを複製し、請求書としての体裁に書き換える。
 
     「御見積内訳書」シートを持たない、「御見積書」だけの簡易なスプレッドシートにも
     対応する（その場合は御見積書側だけを請求書の体裁にする）。
+
+    ratio_percentが100未満の場合（内金請求）は、御見積書の工種ごとの内訳行を
+    1行の簡易表記に差し替え、合計金額にも請求割合を反映する。御見積内訳書は
+    「別紙見積書」として全額の内訳をそのまま残すため変更しない。
 
     返り値は新しく作成した請求書スプレッドシートのID。
     """
@@ -126,7 +132,64 @@ def create_invoice_from_estimate(
         _apply_header_rules(new_id, DETAIL_SHEET, "請　求　内　訳　書", billing_date, due_date)
         _clear_notes_section(new_id, DETAIL_SHEET)
 
+    if ratio_percent != 100:
+        _simplify_summary_for_partial_billing(new_id, SUMMARY_SHEET, project_name, ratio_percent)
+
     return new_id
+
+
+def _simplify_summary_for_partial_billing(
+    spreadsheet_id: str,
+    sheet_name: str,
+    project_name: str,
+    ratio_percent: int,
+) -> None:
+    """内金請求（請求割合が100%未満）のとき、御見積書の工種ごとの内訳行を
+    「工事名　別紙見積書通り」の1行（数量=請求割合、単位=式）に差し替える。
+
+    小計セルの「=SUM(F開始:F終了)」という数式から内訳行の範囲を直接読み取るため、
+    案件ごとに工種の行数や行番号が違っていても対応できる。
+    """
+    values = sheets.read_range(spreadsheet_id, sheet_name, "A1:F120")
+
+    subtotal_row = None
+    for i, row in enumerate(values, start=1):
+        if len(row) >= 5 and row[4] == "小計":
+            subtotal_row = i
+            break
+    if subtotal_row is None:
+        return
+
+    subtotal_formula = sheets.read_cell_formula(spreadsheet_id, sheet_name, f"F{subtotal_row}")
+    match = re.match(r"^=SUM\(F(\d+):F(\d+)\)$", subtotal_formula.strip())
+    if not match:
+        return
+    item_start, item_end = int(match.group(1)), int(match.group(2))
+
+    subtotal_row_values = values[subtotal_row - 1]
+    subtotal_value = subtotal_row_values[5] if len(subtotal_row_values) > 5 else ""
+    try:
+        pretax_subtotal = int(str(subtotal_value).replace(",", "").replace("円", "").strip())
+    except ValueError:
+        return
+
+    blank_rows = [["", "", "", "", "", ""] for _ in range(item_end - item_start + 1)]
+    sheets.write_range(spreadsheet_id, sheet_name, f"A{item_start}:F{item_end}", blank_rows)
+
+    ratio = ratio_percent / 100
+    sheets.write_range(
+        spreadsheet_id,
+        sheet_name,
+        f"A{item_start}:F{item_start}",
+        [[
+            f"{project_name}　別紙見積書通り",
+            "",
+            ratio,
+            "式",
+            pretax_subtotal,
+            f"=E{item_start}*C{item_start}",
+        ]],
+    )
 
 
 def read_estimate_total(spreadsheet_id: str) -> int | None:
