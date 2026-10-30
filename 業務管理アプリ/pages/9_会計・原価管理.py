@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import calendar
 import datetime
 from collections import defaultdict
 
@@ -50,6 +51,24 @@ def _project_label(project_id: int) -> str:
 def _yen(amount: int) -> str:
     """表（st.dataframe）に金額を表示するとき用に、桁区切りカンマを付けた文字列にする。"""
     return f"{amount:,}"
+
+
+def _months_ago(base_date: datetime.date, months: int) -> datetime.date:
+    """base_dateのmonthsヶ月前の日付を返す（「請求一覧」の表示期間の絞り込みに使う）。"""
+    total_months = base_date.year * 12 + (base_date.month - 1) - months
+    year, month = divmod(total_months, 12)
+    month += 1
+    day = min(base_date.day, calendar.monthrange(year, month)[1])
+    return datetime.date(year, month, day)
+
+
+def _is_recent_billing(billing: dict, cutoff: datetime.date) -> bool:
+    """「請求一覧」に表示してよいか（請求日がcutoff以降か）を判定する。
+    請求日が読み取れない場合は、誤って隠さないよう表示する側に倒す。"""
+    try:
+        return datetime.date.fromisoformat(billing["billing_date"]) >= cutoff
+    except (KeyError, ValueError, TypeError):
+        return True
 
 
 def _comma_amount_input(label: str, key: str, help: str | None = None) -> int:
@@ -844,16 +863,20 @@ with tab3:
                             st.error(f"作成に失敗しました: {exc}")
 
     st.divider()
-    st.markdown("#### 請求一覧")
+    st.markdown("#### 請求一覧　（直近3ヶ月間のみ表示）")
     # project_idがNoneのものは定期請求から作られた請求（案件に紐付かない）なので、
     # 案件に紐付くもの（project_options）と合わせて含める。
+    # 一覧が際限なく増え続けて見づらくならないよう、請求日が直近3ヶ月以内のものだけを
+    # 表示する（表示から外れるだけで、会計データ自体は削除されない）。
+    billing_display_cutoff = _months_ago(datetime.date.today(), 3)
     all_billings = [
         b
         for b in billing_store.get_all_billings()
-        if b["project_id"] is None or b["project_id"] in project_options
+        if (b["project_id"] is None or b["project_id"] in project_options)
+        and _is_recent_billing(b, billing_display_cutoff)
     ]
     if not all_billings:
-        st.caption("まだ請求データがありません。")
+        st.caption("直近3ヶ月以内の請求データがありません。")
     else:
         for b in reversed(all_billings):
             with st.container(border=True):
