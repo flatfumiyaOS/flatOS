@@ -78,6 +78,8 @@ def add_billing(
         # 元になった定期請求のid一覧（合算請求なら複数）。案件に紐づく通常の
         # 請求ではNoneのまま。
         "recurring_billing_ids": recurring_billing_ids,
+        # 領収書を発行済みの場合、その領収書スプレッドシートのID。未発行はNone。
+        "receipt_spreadsheet_id": None,
         "status": STATUS_UNPAID,
         "created_at": now,
         "updated_at": now,
@@ -103,6 +105,16 @@ def set_status(billing_id: int, status: str) -> None:
     for b in billings:
         if b["id"] == billing_id:
             b["status"] = status
+            b["updated_at"] = _now()
+            break
+    _save_all(billings)
+
+
+def set_receipt_spreadsheet_id(billing_id: int, spreadsheet_id: str) -> None:
+    billings = _load_all()
+    for b in billings:
+        if b["id"] == billing_id:
+            b["receipt_spreadsheet_id"] = spreadsheet_id
             b["updated_at"] = _now()
             break
     _save_all(billings)

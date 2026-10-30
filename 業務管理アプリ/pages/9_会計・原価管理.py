@@ -857,7 +857,9 @@ with tab3:
     else:
         for b in reversed(all_billings):
             with st.container(border=True):
-                col_info, col_status, col_open, col_delete = st.columns([3, 1, 1, 1])
+                col_info, col_status, col_open, col_receipt, col_delete = st.columns(
+                    [3, 1, 1, 1, 1]
+                )
                 with col_info:
                     ratio_label = f"{b['ratio_percent']}%" if b.get("ratio_percent") else "-"
                     st.write(f"**{b['project_name']}** ／ 請求割合 {ratio_label} ／ ¥{b['amount']:,}")
@@ -881,6 +883,34 @@ with tab3:
                         st.link_button(
                             "開く", sheets.spreadsheet_url(b["spreadsheet_id"]), width="stretch"
                         )
+                with col_receipt:
+                    if b.get("receipt_spreadsheet_id"):
+                        st.link_button(
+                            "領収書を開く",
+                            sheets.spreadsheet_url(b["receipt_spreadsheet_id"]),
+                            width="stretch",
+                        )
+                    elif st.button(
+                        "領収書を発行", key=f"issue_receipt_{b['id']}", width="stretch"
+                    ):
+                        if not b.get("spreadsheet_id"):
+                            st.error("請求書スプレッドシートが無いため、領収書を発行できません。")
+                        else:
+                            with st.spinner("領収書を作成しています..."):
+                                try:
+                                    new_receipt_id = billing_generator.create_receipt_from_invoice(
+                                        b["spreadsheet_id"],
+                                        b["project_name"],
+                                        datetime.date.today(),
+                                        google_auth.get_credentials(),
+                                    )
+                                    billing_store.set_receipt_spreadsheet_id(
+                                        b["id"], new_receipt_id
+                                    )
+                                    st.success("領収書を作成しました。")
+                                    st.rerun()
+                                except Exception as exc:
+                                    st.error(f"領収書の作成に失敗しました: {exc}")
                 with col_delete:
                     if st.button("削除する", key=f"delete_billing_{b['id']}", width="stretch"):
                         st.session_state["pending_delete_billing_id"] = b["id"]

@@ -67,11 +67,14 @@ def _apply_header_rules(
     sheets.set_cell_color(spreadsheet_id, sheet_name, 20, 20, 1, 1, *DEFAULT_BG_COLOR)
 
 
-def _clear_notes_section(spreadsheet_id: str, sheet_name: str) -> None:
+def _clear_notes_section(spreadsheet_id: str, sheet_name: str, add_fee_note: bool = True) -> None:
     """指定したシートの最下部「備考」欄を空にし、振込手数料の注記だけを入れる。
 
     御見積書・御見積内訳書のどちらも、案件ごとに使う行数（工事項目数）が違うため、
     「備考」の位置は固定行ではなく、都度探して求める。
+
+    add_fee_note=Falseの場合、振込手数料の注記は入れず空欄のままにする
+    （領収書では振込先自体を空欄にするため、この注記は不要）。
     """
     values = sheets.read_range(spreadsheet_id, sheet_name, "A1:A400")
     marker_row = None
@@ -98,7 +101,8 @@ def _clear_notes_section(spreadsheet_id: str, sheet_name: str) -> None:
         f"A{marker_row + 1}:A{end_row}",
         [[""] for _ in range(end_row - marker_row)],
     )
-    sheets.write_cell(spreadsheet_id, sheet_name, f"A{marker_row + 1}", "＊お振込手数料はご負担願います。")
+    if add_fee_note:
+        sheets.write_cell(spreadsheet_id, sheet_name, f"A{marker_row + 1}", "＊お振込手数料はご負担願います。")
 
 
 def create_invoice_from_estimate(
@@ -190,6 +194,49 @@ def _simplify_summary_for_partial_billing(
             f"=E{item_start}*C{item_start}",
         ]],
     )
+
+
+def create_receipt_from_invoice(
+    invoice_spreadsheet_id: str,
+    project_name: str,
+    receipt_date: datetime.date,
+    user_credentials: UserCredentials,
+) -> str:
+    """請求書スプレッドシートを複製し、領収書としての体裁に書き換える。
+
+    返り値は新しく作成した領収書スプレッドシートのID。
+    """
+    date_str = receipt_date.strftime("%Y%m%d")
+    title = f"領収書 {date_str} {project_name}"
+    new_id = sheets.copy_spreadsheet(invoice_spreadsheet_id, title, user_credentials)
+
+    sheet_names = sheets.list_sheet_names(new_id)
+    _apply_receipt_rules(new_id, SUMMARY_SHEET, receipt_date)
+    if DETAIL_SHEET in sheet_names:
+        _apply_receipt_rules(new_id, DETAIL_SHEET, receipt_date)
+
+    return new_id
+
+
+def _apply_receipt_rules(spreadsheet_id: str, sheet_name: str, receipt_date: datetime.date) -> None:
+    """請求書→領収書への書き換えルールを1シート分適用する（御見積書・御見積内訳書で共通）。"""
+    sheets.write_cells(
+        spreadsheet_id,
+        sheet_name,
+        {
+            "F5": "領　収　書",
+            "A12": "下記、正に領収いたしました。",
+            "A16": "",
+            "B16": "",
+            "A18": "",
+            "B18": "",
+            "E10": "発行日：",
+            "F10": _format_japanese_date(receipt_date),
+        },
+    )
+    sheets.set_cell_color(spreadsheet_id, sheet_name, 16, 16, 1, 2, *DEFAULT_BG_COLOR)
+    sheets.set_cell_color(spreadsheet_id, sheet_name, 18, 18, 1, 2, *DEFAULT_BG_COLOR)
+    _clear_notes_section(spreadsheet_id, sheet_name, add_fee_note=False)
 
 
 def read_estimate_total(spreadsheet_id: str) -> int | None:
